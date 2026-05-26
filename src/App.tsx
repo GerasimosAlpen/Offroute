@@ -158,13 +158,15 @@ function NotificationCard() {
       let granted = await isPermissionGranted();
       if (!granted) {
         const perm = await requestPermission();
-        granted = perm === "granted";
+        // "default" = user hasn't decided yet, still attempt on macOS
+        granted = perm === "granted" || perm === "default";
+        setStatus(`permission: ${perm}`);
       }
-      if (!granted) { setStatus("permission denied"); return; }
-      sendNotification({ title: "Offroute", body: "Notifications are wired up!" });
+      if (!granted) { setStatus("permission denied — enable in System Settings"); return; }
+      await sendNotification({ title: "Offroute", body: "Notifications are wired up!" });
       setStatus("sent!");
-    } catch {
-      setStatus("error");
+    } catch (e) {
+      setStatus(`error: ${String(e)}`);
     }
   }
 

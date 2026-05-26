@@ -13,7 +13,7 @@ fn build_stronghold() -> tauri::plugin::TauriPlugin<tauri::Wry> {
         let salt = b"offroute-key-v01";
         let mut key = vec![0u8; 32];
         argon2
-            .hash_password_into(password, salt, &mut key)
+            .hash_password_into(password.as_bytes(), salt, &mut key)
             .expect("argon2 key derivation failed");
         key
     })
