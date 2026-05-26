@@ -1457,6 +1457,7 @@
     "packageJson": {
       "dependencies": [
         "npm:@preact/preset-vite@^2.9.3",
+        "npm:@tailwindcss/vite@^4.3.0",
         "npm:@tanstack/preact-query@^5.100.14",
         "npm:@tauri-apps/api@2",
         "npm:@tauri-apps/cli@2",
@@ -1466,6 +1467,7 @@
         "npm:lucide-preact@^1.16.0",
         "npm:preact@^10.25.1",
         "npm:prisma@^7.8.0",
+        "npm:tailwindcss@^4.3.0",
         "npm:typescript@~5.6.2",
         "npm:vite@^6.0.3",
         "npm:zustand@^5.0.13"
