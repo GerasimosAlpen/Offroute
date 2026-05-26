@@ -42,3 +42,231 @@ This project is indexed by GitNexus as **offroute** (27 symbols, 18 relationship
 | Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md`             |
 
 <!-- gitnexus:end -->
+
+---
+
+# Offroute — Project Architecture
+
+## Full Tech Stack
+
+| Layer | Technology | Notes |
+|-------|-----------|-------|
+| **Package manager** | Deno | `deno task dev/build`, `deno.lock` |
+| **Frontend framework** | Preact 10 + TypeScript 5.6 | Not React — use `preact/hooks`, `preact/compat` |
+| **Bundler** | Vite 6 | Port 1420 (fixed for Tauri), `@preact/preset-vite` |
+| **Styling** | Tailwind CSS v4 | Via Vite plugin, not PostCSS |
+| **State** | Zustand v5 | |
+| **Data fetching** | TanStack Query (preact) + Axios | `@tanstack/preact-query` |
+| **Validation** | Valibot | |
+| **FP / Effects** | Effect-TS | |
+| **Icons** | Lucide Preact | `lucide-preact` |
+| **Animation** | Framer | `framer` package |
+| **Desktop shell** | Tauri v2 | |
+| **Rust deps** | tauri 2, tauri-plugin-opener, serde, serde_json | |
+| **Backend (external)** | NestJS v11 + Prisma v7 + PostgreSQL | Lives in `_server/`, runs separately |
+
+> **Known issue:** `prisma` is listed in the root `package.json` dependencies — it belongs only in `_server/`. Do not import Prisma in frontend code.
+
+---
+
+## Tauri v2 Architecture
+
+### Process Model
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  OS Process: tauri-app (Rust binary)                    │
+│                                                         │
+│  ┌─────────────────┐    IPC (invoke/emit)    ┌────────┐ │
+│  │  Core (lib.rs)  │ ◄──────────────────────► │WebView│ │
+│  │  Tokio runtime  │                          │Preact │ │
+│  │  Plugin system  │                          │ App   │ │
+│  └─────────────────┘                          └────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **main.rs** — thin entrypoint, calls `lib.rs::run()`. `windows_subsystem = "windows"` hides console in release.
+- **lib.rs** — `tauri::Builder` setup: register plugins, register commands, run event loop.
+- **WebView** — OS native webview (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux). Renders the Preact app.
+- **IPC bridge** — `invoke()` calls Rust commands; `emit()`/`listen()` for events.
+
+### IPC: Commands vs Events
+
+**Commands** (request/response, frontend → Rust):
+```rust
+// Rust
+#[tauri::command]
+async fn my_command(arg: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
+    Ok(format!("result: {}", arg))
+}
+```
+```ts
+// Frontend
+import { invoke } from "@tauri-apps/api/core";
+const result = await invoke<string>("my_command", { arg: "hello" });
+```
+
+**Events** (fire-and-forget, bidirectional):
+```rust
+// Rust → Frontend
+app_handle.emit("event-name", payload)?;
+// Rust listen to frontend event
+app_handle.listen("frontend-event", |event| { ... });
+```
+```ts
+// Frontend → Rust
+import { emit, listen } from "@tauri-apps/api/event";
+await emit("frontend-event", { data: 123 });
+const unlisten = await listen<MyPayload>("event-name", (e) => console.log(e.payload));
+```
+
+### Capability / Permission System (v2)
+
+All IPC access is **allow-listed** in `src-tauri/capabilities/*.json`. Default at `capabilities/default.json`:
+- `core:default` — window management, events, paths, webview, tray, menu, image, resources
+- `opener:default` — open `http://`, `https://`, `mailto:`, `tel://` URLs + reveal files
+
+To add a plugin's permissions, add its identifier to the capability file **and** register the plugin in `lib.rs`.
+
+### Shared State in Rust
+
+```rust
+use std::sync::Mutex;
+
+struct AppState {
+    counter: Mutex<u32>,
+}
+
+// in run():
+.manage(AppState { counter: Mutex::new(0) })
+
+// in command:
+#[tauri::command]
+fn increment(state: tauri::State<'_, AppState>) -> u32 {
+    let mut c = state.counter.lock().unwrap();
+    *c += 1;
+    *c
+}
+```
+
+Use `Mutex<T>` for mutable state, `RwLock<T>` for read-heavy state. Never hold a lock across `.await`.
+
+---
+
+## What Can Be Built in src-tauri
+
+### Core Native Features (no extra deps)
+- **Multi-window** — create windows from Rust or frontend via `tauri::WebviewWindowBuilder`
+- **Frameless / transparent windows** — set `decorations: false`, `transparent: true` in `tauri.conf.json`
+- **macOS vibrancy / window effects** — `tauri::window::Effect::*` (Sidebar, HudWindow, UnderWindowBackground, etc.)
+- **System tray** — `tauri::tray::TrayIconBuilder`, native menu, click handlers
+- **Native app menu** — `tauri::menu::MenuBuilder`
+- **App badge** (macOS dock) — `window.set_badge_label()`
+- **Progress bar** (Windows taskbar) — `window.set_progress_bar()`
+- **Window drag region** — `data-tauri-drag-region` HTML attribute
+- **Background Tokio tasks** — spawn async work, emit events back to frontend
+- **Custom asset protocol** — serve local files via `tauri://` scheme
+
+### Official Plugins (add to Cargo.toml + register in lib.rs + add permission to capability)
+
+| Plugin | Cargo crate | Permission prefix | Use |
+|--------|-------------|-------------------|-----|
+| File system | `tauri-plugin-fs` | `fs:` | Read/write local files |
+| SQLite | `tauri-plugin-sql` | `sql:` | Local DB, replaces NestJS+Postgres for offline data |
+| HTTP client | `tauri-plugin-http` | `http:` | Fetch from Rust, bypasses CORS |
+| Notifications | `tauri-plugin-notification` | `notification:` | OS native notifications |
+| Global shortcuts | `tauri-plugin-global-shortcut` | `global-shortcut:` | System-wide keybindings |
+| Clipboard | `tauri-plugin-clipboard-manager` | `clipboard-manager:` | Read/write clipboard |
+| Key-value store | `tauri-plugin-store` | `store:` | Persistent JSON store |
+| Auto-updater | `tauri-plugin-updater` | `updater:` | OTA updates |
+| Single instance | `tauri-plugin-single-instance` | — | Prevent multiple app instances |
+| Deep links | `tauri-plugin-deep-link` | `deep-link:` | Custom URL scheme (offroute://) |
+| Shell | `tauri-plugin-shell` | `shell:` | Execute shell commands |
+| Process | `tauri-plugin-process` | `process:` | Restart, exit app |
+| OS info | `tauri-plugin-os` | `os:` | Platform/version detection |
+| Opener | `tauri-plugin-opener` | `opener:` | **Already installed** |
+
+### Custom Rust Modules to Build
+- **Background service** — long-running Tokio task (e.g. polling NestJS, file watcher, WebSocket client)
+- **Local cache layer** — SQLite via tauri-plugin-sql, cache API responses offline
+- **IPC command modules** — split into files: `src/commands/`, `src/services/`, register all in `lib.rs`
+- **Native file operations** — read/write config files, export data
+- **Crypto** — use `ring` or `aes-gcm` crate for local data encryption
+
+---
+
+## Performance: Blazing Fast Setup
+
+### Cargo.toml — Release Profile (add this)
+```toml
+[profile.release]
+opt-level = 3        # max speed optimization
+lto = true           # link-time optimization, reduces binary size + faster
+codegen-units = 1    # single codegen unit = better optimization
+panic = "abort"      # smaller binary, no unwinding
+strip = true         # strip debug symbols from binary
+```
+
+### tauri.conf.json — Performance Configs
+- Only enable `features` you actually use in `tauri = { version = "2", features = [] }` — empty = minimal
+- Set `bundle.targets` to only the platform you ship (not `"all"` in production)
+- Enable `app.windows[0].visible: false` then show after content loads to avoid blank flash
+
+### Frontend Performance
+- Preact is already ~3KB — do NOT switch to React
+- Tailwind v4 via Vite plugin = zero-runtime CSS, purged automatically
+- TanStack Query handles caching — don't duplicate with manual state
+- Use `invoke` for heavy computation, never block JS thread with CPU work
+- Prefer Rust for: file I/O, crypto, data processing, HTTP to external APIs
+
+### IPC Performance Tips
+- Use `async` commands for anything that does I/O
+- Batch multiple values into one `invoke` call instead of multiple round-trips
+- Use **events** (fire-and-forget) for streaming/progress updates, not repeated `invoke` polling
+- Avoid passing large JSON blobs — use Tauri's `Resource` system or file paths for large data
+
+---
+
+## Current State: What Exists
+
+```
+src-tauri/
+├── src/
+│   ├── main.rs          # entrypoint, no-console in release
+│   └── lib.rs           # Builder setup, greet command
+├── capabilities/
+│   └── default.json     # core:default + opener:default
+├── Cargo.toml           # tauri 2, tauri-plugin-opener, serde, serde_json
+├── tauri.conf.json      # productName: tauri-app (placeholder), 800x600 window
+└── build.rs             # tauri_build::build()
+```
+
+**Placeholders to update before shipping:**
+- `tauri.conf.json`: `productName`, `identifier` (`com.macbookairm1.tauri-app`)
+- `tauri.conf.json`: window title "Jawa ganteng"
+- `tauri.conf.json`: `security.csp` is `null` — set a real CSP before release
+- `Cargo.toml`: `name = "tauri-app"`, `authors = ["you"]`
+- Add `[profile.release]` optimizations to `Cargo.toml`
+
+---
+
+## File Layout
+
+```
+/
+├── src/                  # Preact frontend
+│   ├── main.tsx          # render(<App />, ...)
+│   └── App.tsx           # root component, uses invoke("greet")
+├── src-tauri/            # Rust / Tauri v2
+│   ├── src/lib.rs        # core: Builder, commands, plugins
+│   ├── src/main.rs       # binary entrypoint
+│   ├── capabilities/     # ACL permission files per window
+│   ├── Cargo.toml        # rust deps
+│   └── tauri.conf.json   # app config: window, build, bundle, security
+├── _server/              # NestJS backend (runs separately, port 3000)
+│   ├── src/              # NestJS modules
+│   └── prisma/           # schema.prisma (PostgreSQL, no URL set yet)
+├── index.html            # Vite entry HTML
+├── vite.config.ts        # Vite: Preact + Tailwind, port 1420
+└── package.json          # Deno-managed: preact, zustand, tailwind, tauri deps
+```
