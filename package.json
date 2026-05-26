@@ -15,6 +15,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "axios": "^1.16.1",
+    "effect": "^3.21.2",
     "framer": "^3.0.4",
     "lucide-preact": "^1.16.0",
     "preact": "^10.25.1",
