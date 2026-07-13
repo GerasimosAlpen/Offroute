@@ -1,16 +1,79 @@
 # TODO
 
-## Native device location (deferred)
+Split three ways: **Backend** (NestJS server in `_server/` — none of it exists
+yet, per `CLAUDE.md`), **Backend (Tauri)** (native Rust/Tauri-side work), and
+**Frontend** (Preact UI, mostly already built as honest simulations pending
+the backend work below).
 
-Removed for now — was causing macOS link failures and the research burned a lot
-of disk space mid-session. Browser Geolocation (`src/store/location.ts`) is
-back to being the only location source, same as before this was attempted.
+---
+
+# Backend (NestJS)
+
+## Realtime personel tracking & tasking (not started)
+
+Needed for: "ranger Budi takes a task (e.g. check on the crash) → track him
+in realtime" and the message-pin feature below. None of this exists — there's
+no task/assignment concept in the data model at all yet, only the FLARE
+drill's own internal, throwaway "nearest mesh node" pick.
+
+- **Task/assignment model** — a personel can *take* a task (an incident, a
+  minor hazard, a FLARE dispatch) which should be a real assignment record,
+  not implicit. Needs: `Task` (or reuse `Report`/`Incident` per README's
+  planned model) with a `assignedTo` personel + status (open/taken/en
+  route/on scene/done).
+- **Realtime location broadcast for on-task personel** — once a task is
+  taken, that personel's live position needs to stream to radar over the
+  WebSocket gateway (README phase 3; `socket.io-client` already installed on
+  frontend for this). This generalizes what the FLARE sequence fakes today
+  (a single hardcoded "nearest mesh node" moving along a route) to: *any*
+  personel, on *any* accepted task, tracked live.
+- **Personel status messages, geotagged** — personel sends a free-text
+  status/report; needs `{ senderId, text, lat, lon, timestamp }` over the WS
+  gateway. This is what lets the message "ping their last location on the
+  map" (see Frontend section) — the backend just needs to carry the
+  coordinates alongside the message, nothing fancy.
+- **Lapor Incident report endpoint** — REST + `Report`/`Incident` model
+  (README phase 2/3). `MOCK_HAZARDS` in `TacticalMapCanvas.tsx` (fire,
+  crash, theft, etc.) are hardcoded offsets standing in for this.
+- **FLARE broadcast persistence** — right now "Mode Flare" only sets local
+  Zustand state (`src/store/flare.ts`); a real major-incident declaration
+  should hit the backend so it's not just a client-side toggle.
+
+## BMKG weather — needs an adm4 lookup
+
+BMKG's forecast API (`api.bmkg.go.id/publik/prakiraan-cuaca?adm4=<code>`) is
+reachable, but needs a kelurahan-level `adm4` code — no coordinate→adm4
+lookup exists in this app, and Indonesia has thousands of these codes.
+**Don't hardcode one region** (e.g. always Jakarta) regardless of the
+ranger's real position — geographically dishonest, same problem noted below
+for the FLARE drill's epicenter. Needs a real lookup dataset/service (could
+be a small self-hosted lookup table, or a geocoding-to-adm4 API if one
+exists) before this is worth building.
+
+## Routing — move off the OSRM demo server before shipping
+
+`fetchRoadRoute()` (in `TacticalMapCanvas.tsx`) calls
+`router.project-osrm.org` — OSRM's public **demo** server, free/keyless,
+real road-snapped routes, but rate-limited and explicitly "not suitable for
+production" per OSRM's own usage policy. Before shipping: self-host OSRM, or
+move to a paid routing API (GraphHopper, Mapbox, etc.). Also still
+fully online-only — see the offline routing note under Backend (Tauri).
+
+---
+
+# Backend (Tauri / Rust)
+
+## Native device location — deferred (disk/build issues, see history)
+
+Removed after causing macOS link failures and burning a lot of disk space
+mid-session. Browser Geolocation (`src/store/location.ts`) is the only
+location source again, same as before this was attempted.
 
 **Why native was wanted:** Tauri's webview Geolocation API is unreliable
-across platforms, so the plan was a real Tauri command
-(`get_device_location`) backed by the actual OS location service per
-platform, mirroring how `get_battery_status` / `get_network_status` already
-work in `src-tauri/src/commands/system_status.rs`.
+across platforms; the plan was a real Tauri command (`get_device_location`)
+backed by the actual OS location service per platform, mirroring
+`get_battery_status`/`get_network_status` in
+`src-tauri/src/commands/system_status.rs`.
 
 **What was learned, per platform — reuse this before re-researching:**
 
@@ -28,14 +91,12 @@ work in `src-tauri/src/commands/system_status.rs`.
     Also bump `tauri.conf.json` → `bundle.macOS.minimumSystemVersion` to match.
   - Do this on a machine with headroom — the Swift bridge build products are
     large (ate multiple GB of `target/debug` during dev).
-
 - **Linux** — `geoclue-zbus` crate, real GeoClue2 D-Bus flow, method names
   confirmed by generating its docs locally (`ManagerProxy::get_client`,
   `ClientProxy::start`/`receive_location_updated`,
   `LocationProxy::latitude`/`longitude`/`accuracy`). **Never actually run** —
   no Linux box to test on. Also **GPL-2.0-or-later** licensed, unlike every
   other dependency in this project — check that's acceptable before shipping.
-
 - **Windows** — blocked. `windows` crate + `Devices_Geolocation` feature hit a
   compile error in a transitive dep: `windows-future` referencing
   `windows_threading::submit`, which didn't exist in the resolved version.
@@ -54,231 +115,254 @@ Windows (`netsh wlan show interfaces`) and Linux (`/proc/net/wireless`)
 branches, but only the macOS one has actually been run. Verify on real
 Windows/Linux machines before relying on it.
 
-## Tactical Map — wire real backend data
+## Bluetooth — two tiers, build tier 1 first
 
-`TacticalMapCanvas.tsx` now renders a real Leaflet map (`react-leaflet`,
-CARTO dark basemap) centered on the ranger's actual GPS position, but the
-markers on it are still mock data:
+Both tiers sit on top of the Bluetooth research spike already flagged in
+`CLAUDE.md` (no official Tauri Bluetooth plugin exists; needs a custom Rust
+module, e.g. `btleplug`).
 
-- **Other rangers' positions** — no markers for other personel yet at all.
-  Once the realtime location endpoint exists (README phase 3 — NestJS
-  WebSocket gateway; `socket.io-client` is already installed on the
-  frontend), add a `<Marker>` per personel, updated as their location events
-  arrive. See the `TODO(backend)` comment above `SELF_ICON` in
-  `TacticalMapCanvas.tsx` for where this plugs in.
-- **Incident/report locations** — `MOCK_HAZARDS` in the same file is three
-  hardcoded incidents offset from the ranger's own position, just so
-  something renders. Once the Lapor Incident report endpoint exists
-  (README phase 2/3 — NestJS `ranger` module + Report/Incident model),
-  replace `MOCK_HAZARDS` with real incident coordinates fetched from there.
+**Tier 1 (guaranteed floor, build this first):** plain Bluetooth data/text
+communication between personel↔personel and personel↔radar when internet is
+down — the original README requirement. Both ends have the app open,
+Bluetooth on, exchanging structured messages (status updates, GPS pings,
+short text) over a direct BLE GATT connection or classic Bluetooth serial.
+Normal foreground BLE — doesn't fight iOS's background restrictions the way
+tier 2 would. `btleplug` gives real cross-platform BLE support for this on
+desktop (radar, and personel if it ends up desktop too).
 
-## FLARE / dispatch sequence — fully simulated
+**Tier 2 (stretch goal, layered on top of tier 1, not a prerequisite for
+it):** victim/personel phone-as-beacon when buried/stuck with zero
+internet. Same problem shape as Apple's Find My network / Android's Find My
+Device network (anonymized BLE beacon + opportunistic relay by any nearby
+device), avalanche transceivers (constant beacon + RSSI "warmer/colder"
+search), and disaster-mesh apps like Bridgefy/goTenna (multi-hop
+store-and-forward with no infrastructure up).
+
+Layered approach if tier 2 gets built:
+1. **Victim/personel phone, "beacon mode"** — on losing connectivity (or
+   manual SOS), broadcast a low-power BLE advertisement (rotating anonymized
+   ID + last GPS fix + battery %), screen off. This is a peripheral/
+   advertising role, not scanning.
+2. **Rescuer (personel) phone, continuous scan** — background BLE central
+   role, logs beacon sightings with RSSI + timestamp, surfaces a
+   "closer/further" search UI. This is what "radar asks personel if their
+   phone detects the victim's signal" (simulated in the FLARE sequence
+   today) would actually be asking about.
+3. **Store-and-forward relay to radar** — if personel is also offline,
+   "found beacon X near Y" hops device-to-device over the same mesh until it
+   reaches connectivity. Delay-tolerant, not realtime.
+
+**Tauri-specific reality check:**
+- Desktop-side BLE central (`btleplug`) is genuinely feasible with what's
+  already identified — covers tier 1 and the scanning half of tier 2.
+- True phone-in-pocket beaconing (broadcasting, tier 2 step 1) is
+  mobile-only: no official Tauri Bluetooth plugin exists for peripheral mode
+  on iOS/Android — needs a custom native plugin (Swift/CoreBluetooth on iOS,
+  Kotlin BLE APIs on Android). Real engineering work.
+- **iOS enforces hard platform restrictions on background BLE
+  advertising/scanning that no framework can bypass** — an Apple policy
+  limit, not a Tauri gap. Android is more permissive but still has
+  background-execution limits (Doze mode, since Android 8).
+- Tauri v2 does support compiling to iOS/Android — worth factoring into the
+  still-open personel platform decision — but that doesn't mean a Bluetooth
+  beacon plugin exists ready to use. It doesn't.
+- **Web Bluetooth is not an option** for tier 2 — central/scanning only,
+  never peripheral/advertising, and unavailable in iOS WKWebView regardless.
+
+## Personel hardware-safety mode — blocked on the platform decision
+
+Requested: when a personel is in danger, engage the phone's hardware
+(flashlight, vibration, alarm sound, SOS/location beacon) to help
+find/protect them, on top of just showing their position on radar's map.
+
+Entirely personel-side (phone) work. Per `CLAUDE.md`'s existing roadmap
+note, **personel UI hasn't started at all** — blocked on deciding whether
+"phone version" means a separate mobile target or a web view, since this
+repo is a Tauri *desktop* app. Nothing to build on the radar side for this;
+don't fake hardware-control UI on the desktop map, since the desktop has
+none of the phone's hardware to control. Revisit once the personel platform
+decision is made.
+
+## Offline routing (Dijkstra) — deferred, not scoped
+
+README's own routing phase: Dijkstra over a local node graph (Rust,
+`petgraph`) for when there's no internet for OSRM/GraphHopper. Not scoped
+yet — depends on the node-graph data model existing first (also not built).
+
+---
+
+# Frontend
+
+## Tactical Map — real Leaflet map, mock data underneath, real behavior on top
+
+`TacticalMapCanvas.tsx` renders a real Leaflet map (`react-leaflet`, CARTO
+dark basemap) centered on the ranger's actual GPS position. Once the backend
+items above exist, wire:
+- Other rangers' positions → a `<Marker>` per personel, updated as location
+  events arrive over the WS gateway (see `TODO(backend)` comment above
+  `SELF_ICON` in `TacticalMapCanvas.tsx`).
+- `src/lib/hazards.ts` (`HAZARDS`) → replace with real incident coordinates
+  from the Lapor Incident endpoint.
+
+**Hazard data unified**: `HAZARDS` (`src/lib/hazards.ts`) and `RANGERS`
+(`src/lib/rangers.ts`) are now single shared sources — the Status Taktis
+sidebar panel and the map markers used to be two disconnected mock lists
+that didn't refer to the same incidents/people. Fixed as part of building
+task assignment below, since "assign a ranger to a hazard" doesn't make
+sense if the two views disagree on what a hazard even is.
+
+## Realtime task-based ranger tracking + smooth glide — built
+
+"Budi takes the crash task" now works for any hazard, not just the FLARE
+drill: `src/store/tasks.ts` picks the nearest free ranger, fetches a real
+OSRM route, and glides them there. `HazardStatusPanel.tsx` has a **Kirim
+Unit** button on every hazard (not just the one "critical" one before) that
+triggers `useTasksStore.assign(hazardId, rangerCoords)`; the panel shows live
+status ("Budi (TIM BRAVO) menuju lokasi..." → "...tiba di lokasi") once
+assigned. `TacticalMapCanvas.tsx`'s `TaskMarkers` renders the moving unit +
+route for every active task.
+
+**Smooth glide, done properly:** `animateAlongRoute()` in `src/lib/routing.ts`
+is `requestAnimationFrame`-driven, interpolating continuously by real elapsed
+time and distance along the route — not the old fixed-tick jump-between-
+resampled-points approach. `FlareSequence`'s own movement was rewritten to
+use the same helper, so both systems glide identically. Same file also has
+`animateRouteReveal()` (see below) — both are generic, reusable for any
+future realtime-tracked marker, not just these two features.
+
+**Route draws itself, doesn't just appear:** `animateRouteReveal()` traces
+the polyline from start to end over ~900ms (via `sliceRouteByProgress()`)
+before travel begins, in both the ad-hoc task flow and the FLARE sequence.
+
+**Ranger names, not just callsigns:** `RANGERS` in `src/lib/rangers.ts` now
+has real first names (Budi/Siti/Andi/Dewi) alongside the existing "TIM
+BRAVO"-style callsigns, specifically so comms log/status text can say "Budi
+(TIM BRAVO)" — matches how the feature was actually asked for.
+
+Still simulated: no real task/assignment backend (see Backend section) —
+`assign()` picks the nearest ranger locally and that's it, nothing is
+persisted or broadcast. Real version needs the backend task model + WS
+broadcast described above.
+
+## Personel status messages as map pins — built (simulated trigger)
+
+A personel status message shows up **both** in the Comm Center log (real,
+shared store — `src/store/commsLog.ts`) **and** as a pin on the tactical map
+at wherever they were standing when they "sent" it
+(`src/store/messagePins.ts` → `MessagePinMarkers` in `TacticalMapCanvas.tsx`,
+clickable to a popup with the message + sender + time).
+
+**What's simulated:** there's no real personel phone app to actually send a
+message from, so the trigger is automatic — `useTasksStore.assign()` posts
+one on arrival (`arrivalReportFor()` in `src/lib/hazards.ts` picks flavor
+text by hazard kind: fire → "api berhasil dikendalikan," crash → "korban
+sudah dievakuasi," etc.). Real version needs the backend geotagged-message
+work above (`{ text, lat, lon, timestamp }` per message over the WS
+gateway) feeding this same store instead of the local `assign()` call.
+
+**Not decided yet:** do message pins persist forever as a history layer
+(maybe toggleable), or fade/expire after some time? Currently they just
+accumulate forever in `useMessagePinsStore` — fine for a demo, not for
+real use with more than a handful of messages.
+
+## All possible evacuation routes, shown together
+
+Requested: during an emergency, don't just show the one chosen route — show
+every route radar could send a team down, so radar can watch everything and
+make the call. `FlareSequence`'s dispatch phase now fetches a real OSRM
+route from **every** ranger's position to the epicenter in parallel, shows
+all of them as dim/thin lines (`evacRoutes` state), logs "N rute evakuasi
+dihitung, dikirim ke seluruh tim," and *then* highlights + travels the
+chosen (nearest) one brightly on top. All routes stay visible until the
+drill reaches "calm."
+
+**Still simulated**, same caveats as the routing note in the Backend
+section (OSRM demo server, no real routing algorithm) — this is just "ask
+OSRM N times instead of once and show them all," not a real
+multi-route-optimization system.
+
+**Route reveal, made catchier:** the dim routes cascade in one at a time
+(staggered ~130ms apart, each tracing over ~650ms) instead of popping in
+together. The chosen route's ranger marker now leads the drawing tip while
+it traces (`unitPos` follows the reveal's leading point in both
+`FlareSequence` and `src/store/tasks.ts`), so it reads as "scouting the path
+live" rather than a line appearing next to a stationary icon.
+
+## FLARE / dispatch sequence — fully simulated, real routing underneath
 
 The sidebar "Mode Flare" button (`FlareButton.tsx` → `src/store/flare.ts`)
-drives a whole scripted sequence in `FlareSequence` (inside
-`TacticalMapCanvas.tsx`), phase by phase: detect (shake + flash + flyTo
-epicenter) → scan (zoom out, reveal mesh nodes) → dispatch (pick nearest
-team, draw a route) → en route (animate the team along the route, spawn a
-second "victim" partway through, log a proximity update near the end) →
-arrived (tight push-in) → reporting (everyone else checks in fine, logged to
-Comm Center) → calm (banner stands down to a small persistent badge, since
-the second victim was never actually found).
+drives a scripted sequence in `FlareSequence` (inside
+`TacticalMapCanvas.tsx`): detect (shake + flash + flyTo epicenter) → scan
+(zoom out, reveal mesh nodes) → dispatch (pick nearest team, draw a route,
+log "RUTE DIKIRIM") → en route (animate along the route, leave a comet
+trail, spawn a second "victim" partway through, log a proximity update) →
+arrived (tight push-in, then radar asks if the personel's device detects the
+victim's signal, personel answers with a distance or "nihil") → reporting
+(everyone else checks in fine) → calm (banner stands down to a small
+persistent badge, since the victim was never actually found). Route stays
+drawn through arrival + reporting, only cleared at calm. Minor/ambient
+hazards shrink to a small, label-less, dim version (`iconMinimized`) while a
+FLARE is actively unfolding, back to full size at calm.
 
-**Mostly simulated, but the route itself is now real** — no earthquake
-detection, no FLARE broadcast to a backend, no Bluetooth. Specifically:
+**Mostly simulated, but real underneath in two places:**
+- **Routing**: `fetchRoadRoute()` gets real road-snapped geometry from OSRM
+  (see Backend section for the production caveat). Falls back to
+  `buildFallbackRoute()` (a bezier curve) if unreachable. Real routes can
+  have very different point counts than expected, so `resamplePath()`
+  resamples to a fixed step count for consistent animation timing — the
+  *drawn* line is still the full, unsampled real route.
+- **Comms log**: `src/store/commsLog.ts` is the real shared store (moved out
+  of `CommsLogPanel.tsx`'s local state) specifically so this sequence can
+  post into it — that part isn't a placeholder.
 
-- `MESH_NODES`, `EPICENTER_OFFSET` — hardcoded offsets from the ranger's own
-  position, same as before.
-- **Routing is real now**: `fetchRoadRoute()` calls
-  `router.project-osrm.org` (OSRM's public **demo** server — free, no key,
-  actual road-snapped routes, but rate-limited and explicitly "not suitable
-  for production" per OSRM's own policy). Falls back to
-  `buildFallbackRoute()` (a bezier curve) if OSRM is unreachable. Before
-  shipping: self-host OSRM or move to a paid routing API. This is also still
-  fully online-only — the README's own routing phase (Dijkstra over a local
-  node graph, for the offline case) is a separate, not-yet-scoped effort;
-  this doesn't cover offline routing.
-- The Bluetooth relay itself is already flagged in `CLAUDE.md` as its own
-  research spike (no official Tauri Bluetooth plugin exists; would need a
-  custom Rust module, e.g. `btleplug`) — this UI is what it should animate
-  into once that exists, not a replacement for building it.
-- `src/store/commsLog.ts` is now the shared comms-log store (moved out of
-  `CommsLogPanel.tsx`'s local state) specifically so the FLARE sequence can
-  post dispatch/status updates into it — that part's a real, reusable piece,
-  not a placeholder.
+Still fake: `MESH_NODES`/`EPICENTER_OFFSET` (hardcoded offsets from the
+ranger's position), the ask/answer about victim detection (comms-log text,
+not real hardware detection — see the Bluetooth tier 2 section), no
+Bluetooth, no backend broadcast of the FLARE itself.
 
 **Cross-page emergency notice:** `EmergencyNotice.tsx` (mounted once in
-`RadarPage.tsx`, so it survives navigation) shows a dismissible corner toast
-if a FLARE is active and the operator isn't on the tactical map page.
-Tracked via `seen`/`markSeen()` in `src/store/flare.ts` — visiting the map
-page marks it seen, so does clicking "Abaikan." Note: only the *notification*
-persists across navigation, not the drill itself — `FlareSequence`'s phase
-state lives locally in `TacticalMapCanvas` and un-mounts (losing its place
-mid-sequence) if the operator navigates away and the component is torn down.
-Acceptable for now since the sequence is short; would need lifting to a
-global store if that becomes a real problem.
+`RadarPage.tsx`, survives navigation) shows a dismissible corner toast if a
+FLARE is active and the operator isn't on the tactical map page. Tracked via
+`seen`/`markSeen()` in `src/store/flare.ts`. Note: only the *notification*
+persists across navigation — `FlareSequence`'s phase state lives locally in
+`TacticalMapCanvas` and un-mounts (losing its place mid-sequence) if the
+operator navigates away. Fine for now since the sequence is short; would
+need lifting to a global store if that becomes a real problem.
 
-**Dropped the giant "GEMPA!" title card** — read as over-the-top rather than
-epic. Kept the double shockwave ring and the (already fairly modest) banner
-text; removed `ImpactTitle` entirely rather than leaving dead code around.
+Dropped the giant "GEMPA!" title card (read as over-the-top) — kept the
+double shockwave ring and the modest banner text.
 
-**Epic-effect pass (visual only, doesn't change any of the above):**
-freeze-frame beat before the shake/flash, a canvas-drawn seismograph HUD
-(`SeismographReadout.tsx`) with amplitude scaled by real magnitude, a comet
-trail of fading `CircleMarker`s behind the dispatched unit, and a live ops
-HUD (`OpsHud` — magnitude counting up, units dispatched, ETA countdown).
+**Epic-effect pass (visual only):** freeze-frame beat before the
+shake/flash, canvas-drawn seismograph HUD (`SeismographReadout.tsx`,
+amplitude scaled by real BMKG magnitude), comet trail of fading
+`CircleMarker`s behind the dispatched unit, live ops HUD (`OpsHud` —
+magnitude counting up, units dispatched, ETA countdown).
+
+**Click-to-focus markers:** every hazard/epicenter marker is clickable
+(`FocusableMarkers`) — flies the camera in tight on whatever's clicked.
+Deliberately manual, not automatic, since the minor hazards are always
+on-screen and auto-focusing all of them would yank the camera around for no
+reason. Could make sense to auto-focus by severity once a real
+detection/ranking system exists — doesn't yet.
 
 ## BMKG earthquake feed — real, live data (not simulated)
 
 `src/store/bmkg.ts` polls `https://data.bmkg.go.id/DataMKG/TEWS/autogempa.json`
-every 2 minutes — BMKG's (Indonesia's geophysics agency) public latest-quake
-feed, no key required, CORS wide open (`access-control-allow-origin: *`,
-confirmed by hand). `BmkgTicker.tsx` shows it as an honest, independent
-live badge (magnitude/depth/region/time) — this is real, not a placeholder.
+every 2 minutes — BMKG's public latest-quake feed, no key required, CORS
+wide open (confirmed by hand). This is real data, not a placeholder.
 
 **Important boundary, don't blur this later:** the FLARE drill borrows this
-feed's real magnitude number (for the seismograph amplitude, the HUD counter,
-the banner text) but keeps its epicenter at a local offset from the ranger's
-position. The actual BMKG quake could be anywhere in Indonesia — using its
-real coordinates for a "ranger responds locally" drill would be geographically
+feed's real magnitude (seismograph amplitude, HUD counter, banner text) but
+keeps its epicenter at a local offset from the ranger's position — the
+actual BMKG quake could be anywhere in Indonesia, and using its real
+coordinates for a "ranger responds locally" drill would be geographically
 dishonest. If a later feature wants to react to a *specific* real quake's
-actual location (e.g. only trigger FLARE when a real quake lands within X km
-of the ranger), that needs new logic — don't assume `useBmkgQuake()`'s
-coordinates are "near" anything.
+actual location (e.g. only trigger FLARE within X km of the ranger), that
+needs new logic — don't assume `useBmkgQuake()`'s coordinates are "near"
+anything.
 
-**Weather — deferred, not started.** BMKG also has a public forecast API
-(`api.bmkg.go.id/publik/prakiraan-cuaca?adm4=<code>`), confirmed reachable,
-but it needs an `adm4` (kelurahan-level) area code — there's no
-coordinate-to-adm4 lookup in this app, and Indonesia has thousands of these
-codes. Don't hardcode one region (e.g. always showing Jakarta's weather
-regardless of the ranger's real position) — that's the same
-geographic-dishonesty problem as above, just for weather instead of quakes.
-Needs a real adm4 lookup dataset/service before this is worth building.
-
-**Two BMKG surfaces now, on purpose:** `BmkgIndicator.tsx` in the sidebar is
-the always-on ambient readout (visible on every page, every phase).
-`BmkgTicker.tsx` on the map only appears once a FLARE is active — same data,
-different context. Don't merge these into one component; the sidebar one is
-"business as usual," the map one is "this is relevant to what's happening
-right now."
-
-**Click-to-focus markers:** every hazard/epicenter marker on the tactical map
-is now clickable (`FocusableMarkers` in `TacticalMapCanvas.tsx`) — flies the
-camera in tight on whatever the operator clicks. Deliberately manual, not
-automatic: these markers are always on-screen (the minor hazards especially),
-so auto-focusing on all of them constantly would just yank the camera around
-for no reason. If a real detection/severity ranking exists later, an
-auto-focus-on-highest-severity behavior could make sense — it doesn't yet.
-
-## Personel hardware-safety mode — not started, blocked on the platform decision
-
-Requested: when a personel is in danger, engage the phone's hardware
-(flashlight, vibration, alarm sound, SOS/location beacon, whatever's
-available) to help find/protect them — on top of just showing their position
-on the radar's map.
-
-This is entirely personel-side (phone) work, and per `CLAUDE.md`'s existing
-roadmap note, **personel UI hasn't started at all** — it's blocked on
-deciding whether "phone version" means a separate mobile target or a web
-view, since this repo is a Tauri *desktop* app. Nothing to build on the radar
-side for this; don't fake hardware-control UI on the desktop map, since the
-desktop has none of the phone's hardware to control. Revisit once the
-personel platform decision is made.
-
-## FLARE sequence, round 3 additions
-
-- Route now stays drawn through arrival + reporting, only cleared once the
-  drill settles to "calm" — so radar can see the whole path actually taken,
-  not just while the unit is mid-transit.
-- Minor/ambient hazards (`MOCK_HAZARDS`) shrink to a small, label-less,
-  45%-opacity version (`iconMinimized`) while a FLARE is actively unfolding
-  (`ACTIVE_DRILL_PHASES`), and return to full size once it settles to "calm"
-  — so they don't compete for attention during the real emergency, without
-  fully disappearing.
-- Dispatch now logs an explicit "RUTE DIKIRIM" (route sent) message, and
-  arrival is followed by a simulated ask/answer: radar asks the dispatched
-  personel whether their device detects the victim's signal, personel
-  answers with a distance if the (simulated) victim is nearby. This is the
-  narrative stand-in for the real hardware-detection question below — it's
-  comms-log text, not an actual detection system.
-
-## Victim/personel phone-as-beacon, offline — architecture notes (not started)
-
-The ask: when a personel or victim's phone loses connectivity (buried, stuck,
-no signal), can their phone still act as a locatable "flare" that other
-personel or radar can find? Real challenge is doing this with **zero
-internet/cell** — the phone still has Bluetooth even with no network.
-
-**This is a solved problem shape, not a novel one** — same pattern as:
-- Apple's **Find My network** / Android's **Find My Device network**:
-  devices broadcast anonymized BLE advertisements; any nearby device
-  (belonging to anyone) opportunistically relays "I saw this beacon here"
-  once *it* regains connectivity.
-- Avalanche transceivers: constant low-power beacon + a "getting
-  warmer/colder" RSSI-based search UI on the rescuer's receiver.
-- Disaster-mesh chat apps (Bridgefy, goTenna, old FireChat): multi-hop
-  store-and-forward over BLE/WiFi-Direct when no infrastructure is up.
-
-**Layered approach if this gets built:**
-1. **Victim/personel phone, "beacon mode"** — on losing connectivity (or a
-   manual SOS button), start broadcasting a low-power BLE advertisement
-   (rotating anonymized ID + last known GPS fix + battery %). Must work with
-   the screen off — this is a peripheral/advertising role, not scanning.
-2. **Rescuer (personel) phone, continuous scan** — background BLE central
-   role, logs every beacon sighting with RSSI + timestamp, surfaces a
-   "closer/further" search UI (the avalanche-transceiver UX). This is what
-   "radar asks personel if their phone detects the victim's signal" (just
-   simulated above) would actually be asking about.
-3. **Store-and-forward relay back to radar** — if personel is also offline,
-   "found beacon X near Y" has to hop device-to-device (same Bluetooth mesh
-   already planned for personel↔radar comms) until it reaches something with
-   connectivity. Classic delay-tolerant networking; not realtime, but
-   eventually-consistent.
-
-**Tauri-specific reality check:**
-- **Desktop side** (radar, and personel *if* it ends up desktop): `btleplug`
-  (the Rust crate already flagged in `CLAUDE.md`'s Bluetooth research spike)
-  gives real cross-platform BLE central/scanning support. This part is
-  genuinely feasible with what's already identified.
-- **True phone-in-pocket beaconing is mobile-only territory**, and:
-  - No official Tauri Bluetooth plugin exists for peripheral *or* central
-    mode on iOS/Android — would need a custom native plugin (Swift/
-    CoreBluetooth on iOS, Kotlin BLE APIs on Android) wrapped through Tauri's
-    plugin system. Real engineering work, not configuration.
-  - **iOS enforces hard platform restrictions on background BLE
-    advertising/scanning that no framework can bypass** — this is an Apple
-    policy limit, not a Tauri gap. Android is more permissive but still has
-    background-execution limits (Doze mode, etc., since Android 8).
-  - Tauri v2 *does* support compiling to iOS/Android, which is worth
-    factoring into the still-open personel platform decision — but "Tauri
-    supports mobile" doesn't mean "Tauri has a Bluetooth beacon plugin
-    ready to use." It doesn't; one would need to be built.
-  - **Web Bluetooth is not an option here at all** — it only supports the
-    central/scanning role, never peripheral/advertising, and isn't available
-    in iOS WKWebView regardless. A pure-JS/webview approach can't do the
-    "victim phone broadcasts" half of this no matter what.
-
-**Recommendation:** don't build this now — it's a real, sizable feature (a
-custom native BLE plugin) layered on top of the already-deferred Bluetooth
-mesh spike, and it depends on the personel platform decision being made
-first (the answer changes what's even possible). When that decision happens,
-fold this specific beacon/scan/relay requirement into that spike's scope
-rather than treating it as a separate ask.
-
-**Fallback floor, regardless of whether beacon-detection ever gets built:**
-victim-beacon detection (tier 2 above) is the stretch goal and may turn out
-to be too constrained by iOS's background-BLE limits to fully deliver. That
-should not block the simpler, guaranteed baseline — **plain Bluetooth
-data/text communication between personel↔personel and personel↔radar when
-internet is down**, which is the original README requirement and is
-meaningfully easier:
-- Doesn't need background/screen-off peripheral advertising — both ends have
-  the app open and Bluetooth on, exchanging structured messages (status
-  updates, GPS pings, short text) over a direct BLE GATT connection or
-  classic Bluetooth serial. This is a normal foreground BLE connection, not
-  fighting iOS's background restrictions the way beacon-mode would.
-- This is the actual floor the roadmap already commits to (CLAUDE.md:
-  "offline mode... changing into bluetooth to send all of the data across").
-  Build *this* first when the Bluetooth spike gets scoped; treat
-  beacon/victim-detection as an enhancement on top once the base comms
-  channel works, not a prerequisite for it.
+**Two BMKG surfaces, on purpose:** `BmkgIndicator.tsx` in the sidebar is the
+always-on ambient readout (every page, every phase). `BmkgTicker.tsx` on the
+map only appears once a FLARE is active — same data, different context.
+Don't merge these; sidebar = "business as usual," map = "relevant right
+now."

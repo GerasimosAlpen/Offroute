@@ -1,5 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
-import { MapContainer, TileLayer, Marker, Polyline, CircleMarker, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Polyline, CircleMarker, Popup, useMap } from "react-leaflet";
 import { motion, useAnimation, AnimatePresence } from "framer-motion";
 import L from "leaflet";
 import { Plus, Minus, LocateFixed } from "lucide-preact";
@@ -8,21 +8,21 @@ import { useDeviceLocation } from "@/store/location";
 import { useFlareStore } from "@/store/flare";
 import { useCommsLogStore } from "@/store/commsLog";
 import { useBmkgQuake } from "@/store/bmkg";
+import { useTasksStore } from "@/store/tasks";
+import { useMessagePinsStore } from "@/store/messagePins";
+import { RANGERS, type Ranger } from "@/lib/rangers";
+import { HAZARDS, type HazardKind } from "@/lib/hazards";
+import {
+  fetchRoadRoute,
+  buildFallbackRoute,
+  metersBetween,
+  animateAlongRoute,
+  animateRouteReveal,
+  simulatedTravelDurationMs,
+} from "@/lib/routing";
 import { SeismographReadout } from "./SeismographReadout";
 import { BmkgTicker } from "./BmkgTicker";
 import "@/lib/leaflet-setup";
-
-type HazardKind = "fire" | "blocked" | "medical" | "crash" | "theft";
-
-interface HazardMarker {
-  id: string;
-  label: string;
-  /** [lat, lon] offset from the ranger's own position. */
-  offset: [number, number];
-  icon: L.DivIcon;
-  /** Shrunk, label-less version shown while a major FLARE is active, so it doesn't compete for attention. */
-  iconMinimized: L.DivIcon;
-}
 
 const HAZARD_STYLE: Record<HazardKind, { color: string; shadow: string; diamond?: boolean }> = {
   fire: { color: "#ff0040", shadow: "rgba(255,0,64,0.5)" },
@@ -56,54 +56,13 @@ function buildHazardIcon(kind: HazardKind, label: string, minimized = false) {
   });
 }
 
-// TODO(backend): these are placeholder incidents, offset from the ranger's
-// own position just so something renders nearby. Once the Lapor Incident
-// report endpoint exists (README phase 2/3 — NestJS `ranger` module +
-// Report/Incident model), replace this with real incident coordinates
-// fetched from there instead of static offsets.
-//
-// These stay on the map in every phase, including idle — they're the
-// day-to-day minor stuff (fire, crash, theft) the radar operator keeps an
-// eye on when there's no active FLARE, not part of the drill sequence. They
-// shrink (see iconMinimized) rather than disappear while a FLARE is active,
-// so radar still knows they're there without them competing for attention.
-const MOCK_HAZARDS: HazardMarker[] = [
-  {
-    id: "a01",
-    label: "A01 - API",
-    offset: [0.004, -0.002],
-    icon: buildHazardIcon("fire", "A01 - API"),
-    iconMinimized: buildHazardIcon("fire", "A01 - API", true),
-  },
-  {
-    id: "road1",
-    label: "JALUR PUTUS",
-    offset: [-0.003, 0.005],
-    icon: buildHazardIcon("blocked", "JALUR PUTUS"),
-    iconMinimized: buildHazardIcon("blocked", "JALUR PUTUS", true),
-  },
-  {
-    id: "med1",
-    label: "EVAK MEDIS",
-    offset: [-0.001, -0.006],
-    icon: buildHazardIcon("medical", "EVAK MEDIS"),
-    iconMinimized: buildHazardIcon("medical", "EVAK MEDIS", true),
-  },
-  {
-    id: "crash1",
-    label: "KECELAKAAN",
-    offset: [0.0025, 0.0075],
-    icon: buildHazardIcon("crash", "KECELAKAAN"),
-    iconMinimized: buildHazardIcon("crash", "KECELAKAAN", true),
-  },
-  {
-    id: "theft1",
-    label: "LAPORAN PENCURIAN",
-    offset: [-0.006, 0.0015],
-    icon: buildHazardIcon("theft", "LAPORAN PENCURIAN"),
-    iconMinimized: buildHazardIcon("theft", "LAPORAN PENCURIAN", true),
-  },
-];
+// Icons built once per hazard from the shared `HAZARDS` data (src/lib/hazards.ts) — same source the Status Taktis sidebar panel reads, so map markers and the sidebar list always agree.
+const HAZARD_ICONS: Record<string, { icon: L.DivIcon; iconMinimized: L.DivIcon }> = Object.fromEntries(
+  HAZARDS.map((h) => [
+    h.id,
+    { icon: buildHazardIcon(h.kind, h.label), iconMinimized: buildHazardIcon(h.kind, h.label, true) },
+  ]),
+);
 
 const SELF_ICON = L.divIcon({
   className: "",
@@ -150,26 +109,7 @@ const VICTIM_ICON = L.divIcon({
   iconSize: [0, 0],
 });
 
-interface MeshNode {
-  id: string;
-  callsign: string;
-  /** [lat, lon] offset from the ranger's own position. */
-  offset: [number, number];
-}
-
-// TODO(backend): simulated Bluetooth-mesh peers for the offline-fallback
-// demo below. Real implementation needs the Bluetooth relay research spike
-// (README requirement — no official Tauri Bluetooth plugin exists yet,
-// flagged as a separate scoped effort in CLAUDE.md). This is standing in for
-// "we lost internet, but mesh pings from nearby personel still get through."
-const MESH_NODES: MeshNode[] = [
-  { id: "bravo", callsign: "TIM BRAVO", offset: [0.006, 0.004] },
-  { id: "alpha", callsign: "TIM ALPHA", offset: [-0.005, -0.003] },
-  { id: "charlie", callsign: "TIM CHARLIE", offset: [0.003, -0.007] },
-  { id: "delta", callsign: "TIM DELTA", offset: [-0.007, 0.006] },
-];
-
-function buildMeshIcon(callsign: string) {
+function buildRangerIcon(label: string) {
   return L.divIcon({
     className: "",
     html: `
@@ -179,7 +119,7 @@ function buildMeshIcon(callsign: string) {
           <span style="position:absolute;inset:5px;border-radius:9999px;background:#5fb3b3;border:2px solid #0a0a0a;"></span>
         </div>
         <div style="background:#131313;border:1px solid #5fb3b3;padding:1px 6px;white-space:nowrap;">
-          <span style="color:#5fb3b3;font-family:'JetBrains Mono Variable',monospace;font-size:10px;">${callsign} · BT</span>
+          <span style="color:#5fb3b3;font-family:'JetBrains Mono Variable',monospace;font-size:10px;">${label}</span>
         </div>
       </div>
     `,
@@ -187,102 +127,21 @@ function buildMeshIcon(callsign: string) {
   });
 }
 
+const MESSAGE_PIN_ICON = L.divIcon({
+  className: "",
+  html: `
+    <div style="position:relative;width:20px;height:20px;transform:translate(-50%,-100%);display:flex;align-items:center;justify-content:center;">
+      <div style="width:20px;height:20px;border-radius:9999px 9999px 9999px 2px;background:#e5e2e1;border:2px solid #131313;transform:rotate(45deg);"></div>
+    </div>
+  `,
+  iconSize: [0, 0],
+});
+
 function formatKoor(lat: number, lon: number) {
   const latHemi = lat >= 0 ? "N" : "S";
   const lonHemi = lon >= 0 ? "E" : "W";
   return `KOOR: ${Math.abs(lat).toFixed(4)}°${latHemi} ${Math.abs(lon).toFixed(4)}°${lonHemi}`;
 }
-
-/** Flat-earth approximation — fine at the sub-kilometer scale these mock offsets live at. */
-function metersBetween(a: [number, number], b: [number, number]) {
-  const latM = (a[0] - b[0]) * 111_320;
-  const lonM = (a[1] - b[1]) * 111_320 * Math.cos((a[0] * Math.PI) / 180);
-  return Math.sqrt(latM ** 2 + lonM ** 2);
-}
-
-const OSRM_ENDPOINT = "https://router.project-osrm.org/route/v1/driving";
-
-// TODO(routing): router.project-osrm.org is OSRM's public DEMO server — free,
-// no key, real road-snapped routing, but rate-limited and explicitly "not
-// suitable for production" per OSRM's own usage policy. Fine for a demo;
-// self-host OSRM or move to a paid routing API (GraphHopper, Mapbox, etc.)
-// before shipping. Also still fully online-only — the README's own
-// deferred-pending-offline-decision routing phase (Dijkstra over a local
-// node graph) is what would cover the offline case; this doesn't replace it.
-async function fetchRoadRoute(
-  start: [number, number],
-  end: [number, number],
-): Promise<[number, number][] | null> {
-  try {
-    const url = `${OSRM_ENDPOINT}/${start[1]},${start[0]};${end[1]},${end[0]}?overview=full&geometries=geojson`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const coords: [number, number][] | undefined = data?.routes?.[0]?.geometry?.coordinates;
-    if (!coords || coords.length < 2) return null;
-    // OSRM returns [lon, lat] pairs — Leaflet wants [lat, lon].
-    return coords.map(([lon, lat]: [number, number]) => [lat, lon] as [number, number]);
-  } catch {
-    return null;
-  }
-}
-
-/** Fallback for when OSRM is unreachable — bends a straight line into a gentle curve so it isn't a perfectly artificial line, nothing more. */
-function buildFallbackRoute(start: [number, number], end: [number, number], steps = 40): [number, number][] {
-  const midLat = (start[0] + end[0]) / 2;
-  const midLon = (start[1] + end[1]) / 2;
-  const dLat = end[0] - start[0];
-  const dLon = end[1] - start[1];
-  const bendLat = midLat + dLon * 0.18;
-  const bendLon = midLon - dLat * 0.18;
-
-  const points: [number, number][] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const lat = (1 - t) ** 2 * start[0] + 2 * (1 - t) * t * bendLat + t ** 2 * end[0];
-    const lon = (1 - t) ** 2 * start[1] + 2 * (1 - t) * t * bendLon + t ** 2 * end[1];
-    points.push([lat, lon]);
-  }
-  return points;
-}
-
-/**
- * Real road routes can come back with anywhere from a handful to hundreds of
- * points — walking the animation one raw point at a time would make travel
- * time unpredictable (and occasionally absurdly long). This resamples down
- * to a fixed step count by distance along the path, so animation timing
- * stays consistent regardless of how detailed the source route is. The full
- * unsampled route is still what gets drawn on the map — this is only for
- * the moving-unit ticks.
- */
-function resamplePath(points: [number, number][], steps: number): [number, number][] {
-  if (points.length < 2) return points;
-
-  const cumulative: number[] = [0];
-  for (let i = 1; i < points.length; i++) {
-    cumulative.push(cumulative[i - 1] + metersBetween(points[i - 1], points[i]));
-  }
-  const total = cumulative[cumulative.length - 1];
-  if (total === 0) return points;
-
-  const result: [number, number][] = [];
-  for (let s = 0; s <= steps; s++) {
-    const target = (s / steps) * total;
-    let idx = cumulative.findIndex((d) => d >= target);
-    if (idx <= 0) idx = 1;
-    const segStart = cumulative[idx - 1];
-    const segEnd = cumulative[idx];
-    const segT = segEnd === segStart ? 0 : (target - segStart) / (segEnd - segStart);
-    const [lat1, lon1] = points[idx - 1];
-    const [lat2, lon2] = points[idx];
-    result.push([lat1 + (lat2 - lat1) * segT, lon1 + (lon2 - lon1) * segT]);
-  }
-  return result;
-}
-
-const STEP_MS = 90;
-const ANIMATION_STEPS = 40;
-const TRAIL_LENGTH = 6;
 
 type FlarePhase = "idle" | "detect" | "scan" | "dispatch" | "enroute" | "arrived" | "reporting" | "calm";
 
@@ -292,21 +151,14 @@ interface FlareProgress {
   etaMs: number | null;
 }
 
+const ACTIVE_DRILL_PHASES: FlarePhase[] = ["detect", "scan", "dispatch", "enroute", "arrived", "reporting"];
+
 /**
  * Every hazard/epicenter marker, clickable to bring "all eyes" to it — flies
  * the camera in tight on whatever the operator taps, manual rather than
  * automatic so it doesn't yank the view around on its own for the always-on
  * minor hazards.
  */
-const ACTIVE_DRILL_PHASES: FlarePhase[] = [
-  "detect",
-  "scan",
-  "dispatch",
-  "enroute",
-  "arrived",
-  "reporting",
-];
-
 function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: number }; phase: FlarePhase }) {
   const map = useMap();
   const focus = (pos: [number, number]) => map.flyTo(pos, 18, { duration: 1 });
@@ -314,13 +166,14 @@ function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: numbe
 
   return (
     <>
-      {MOCK_HAZARDS.map((hazard) => {
+      {HAZARDS.map((hazard) => {
         const pos: [number, number] = [ranger.lat + hazard.offset[0], ranger.lon + hazard.offset[1]];
+        const icons = HAZARD_ICONS[hazard.id];
         return (
           <Marker
             key={hazard.id}
             position={pos}
-            icon={minimizeMinorHazards ? hazard.iconMinimized : hazard.icon}
+            icon={minimizeMinorHazards ? icons.iconMinimized : icons.icon}
             eventHandlers={{ click: () => focus(pos) }}
           />
         );
@@ -340,6 +193,74 @@ function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: numbe
   );
 }
 
+/**
+ * Ad-hoc ranger tasks (`src/store/tasks.ts`) — the general "Budi takes the
+ * crash" case, independent of the FLARE drill. One marker + route per active
+ * task, smoothly gliding (see `animateAlongRoute`), left on the map once
+ * arrived.
+ */
+function TaskMarkers() {
+  const tasks = useTasksStore((s) => s.tasks);
+  const map = useMap();
+  const focus = (pos: [number, number]) => map.flyTo(pos, 18, { duration: 1 });
+
+  return (
+    <>
+      {Object.values(tasks).flatMap((task) => {
+        const rangerProfile = RANGERS.find((r) => r.id === task.rangerId);
+        const label = rangerProfile
+          ? task.status === "arrived"
+            ? `${rangerProfile.name} · TIBA`
+            : rangerProfile.name
+          : "";
+        const layers = [];
+        if (task.route.length > 1) {
+          layers.push(
+            <Polyline
+              key={`${task.hazardId}-route`}
+              positions={task.route}
+              pathOptions={{ color: "#66df75", weight: 3, dashArray: "10 8", className: "route-flow" }}
+            />,
+          );
+        }
+        layers.push(
+          <Marker
+            key={`${task.hazardId}-marker`}
+            position={task.unitPos}
+            icon={buildRangerIcon(label)}
+            eventHandlers={{ click: () => focus(task.unitPos) }}
+          />,
+        );
+        return layers;
+      })}
+    </>
+  );
+}
+
+/** Personel status messages, pinned to wherever they were sent from (`src/store/messagePins.ts`). */
+function MessagePinMarkers() {
+  const pins = useMessagePinsStore((s) => s.pins);
+  return (
+    <>
+      {pins.map((pin) => (
+        <Marker key={pin.id} position={[pin.lat, pin.lon]} icon={MESSAGE_PIN_ICON}>
+          <Popup>
+            <div className="font-mono text-xs flex flex-col gap-1">
+              <span className="font-bold text-[#131313]">
+                {pin.rangerName} · {pin.callsign}
+              </span>
+              <span>{pin.text}</span>
+              <span className="text-[10px] text-zinc-500">
+                {new Date(pin.timestamp).toLocaleTimeString()}
+              </span>
+            </div>
+          </Popup>
+        </Marker>
+      ))}
+    </>
+  );
+}
+
 /** Pans to follow the ranger's position — paused while a FLARE sequence is directing the camera itself. */
 function FollowRanger({ lat, lon, enabled }: { lat: number; lon: number; enabled: boolean }) {
   const map = useMap();
@@ -349,6 +270,8 @@ function FollowRanger({ lat, lon, enabled }: { lat: number; lon: number; enabled
   }, [lat, lon, enabled]);
   return null;
 }
+
+const TRAIL_LENGTH = 6;
 
 /**
  * Owns the whole cinematic choreography: freeze-frame beat → detect → zoom
@@ -372,11 +295,12 @@ function FlareSequence({
   onProgress: (progress: FlareProgress) => void;
 }) {
   const map = useMap();
-  const [revealedMesh, setRevealedMesh] = useState<MeshNode[]>([]);
+  const [revealedMesh, setRevealedMesh] = useState<Ranger[]>([]);
   const [dispatchedId, setDispatchedId] = useState<string | null>(null);
   const [unitPos, setUnitPos] = useState<[number, number] | null>(null);
   const [trail, setTrail] = useState<[number, number][]>([]);
   const [route, setRoute] = useState<[number, number][] | null>(null);
+  const [evacRoutes, setEvacRoutes] = useState<{ rangerId: string; route: [number, number][] }[]>([]);
   const [victim, setVictim] = useState<[number, number] | null>(null);
 
   useEffect(() => {
@@ -396,8 +320,9 @@ function FlareSequence({
       setUnitPos(null);
       setTrail([]);
       setRoute(null);
+      setEvacRoutes([]);
       setVictim(null);
-      onProgress({ unitsDispatched: 0, totalUnits: MESH_NODES.length, etaMs: null });
+      onProgress({ unitsDispatched: 0, totalUnits: RANGERS.length, etaMs: null });
 
       // 0. Freeze-frame beat — a held breath before everything cuts loose.
       await wait(280);
@@ -413,7 +338,7 @@ function FlareSequence({
       // 2. Scan — pull back to reveal who's available via the mesh.
       onPhaseChange("scan", "MEMINDAI PERSONEL TERSEDIA VIA MESH BLUETOOTH");
       const bounds = L.latLngBounds([[ranger.lat, ranger.lon], epicenter]);
-      for (const node of MESH_NODES) {
+      for (const node of RANGERS) {
         if (cancelled) return;
         setRevealedMesh((prev) => [...prev, node]);
         bounds.extend([ranger.lat + node.offset[0], ranger.lon + node.offset[1]]);
@@ -425,102 +350,159 @@ function FlareSequence({
         sender: "SISTEM",
         color: "#5fb3b3",
         lead: "MESH",
-        body: `${MESH_NODES.length} personel terdeteksi via bluetooth.`,
+        body: `${RANGERS.length} personel terdeteksi via bluetooth.`,
       });
       await wait(1400);
       if (cancelled) return;
 
-      // 3. Dispatch — nearest team to the epicenter gets sent.
-      const nearest = MESH_NODES.reduce(
+      // 3. Dispatch — nearest team to the epicenter gets sent, but every
+      // team's possible evacuation route gets computed and shown, not just
+      // the chosen one.
+      const nearest = RANGERS.reduce(
         (best, node) => {
           const pos: [number, number] = [ranger.lat + node.offset[0], ranger.lon + node.offset[1]];
           const d = metersBetween(pos, epicenter);
           return d < best.d ? { node, d } : best;
         },
-        { node: MESH_NODES[0], d: Infinity },
+        { node: RANGERS[0], d: Infinity },
       ).node;
+      const senderName = `${nearest.name} (${nearest.callsign})`;
 
-      const start: [number, number] = [ranger.lat + nearest.offset[0], ranger.lon + nearest.offset[1]];
-      onPhaseChange("dispatch", `TERDEKAT: ${nearest.callsign} · MENGHITUNG RUTE TERBAIK...`);
+      onPhaseChange("dispatch", "MENGHITUNG SEMUA RUTE EVAKUASI YANG MUNGKIN...");
       log({
-        sender: nearest.callsign,
-        color: "#5fb3b3",
-        lead: "PERINTAH DITERIMA",
-        body: "menghitung rute, bersiap berangkat.",
+        sender: "PUSAT",
+        color: "#66df75",
+        lead: "RUTE",
+        body: "menghitung seluruh kemungkinan rute evakuasi untuk semua tim.",
       });
-      map.flyTo(start, 16, { duration: 1.1 });
 
-      const rawRoute = (await fetchRoadRoute(start, epicenter)) ?? buildFallbackRoute(start, epicenter);
+      const allRoutes = await Promise.all(
+        RANGERS.map(async (node) => {
+          const from: [number, number] = [ranger.lat + node.offset[0], ranger.lon + node.offset[1]];
+          const r = (await fetchRoadRoute(from, epicenter)) ?? buildFallbackRoute(from, epicenter);
+          return { rangerId: node.id, route: r };
+        }),
+      );
       if (cancelled) return;
-      const routePoints = resamplePath(rawRoute, ANIMATION_STEPS);
-      const totalTravelMs = (routePoints.length - 1) * STEP_MS;
-      setDispatchedId(nearest.id);
-      setRoute(rawRoute);
-      setUnitPos(start);
-      setTrail([start]);
-      onProgress({ unitsDispatched: 1, totalUnits: MESH_NODES.length, etaMs: totalTravelMs });
+
+      // Cascade them in one at a time rather than popping in all at once.
+      setEvacRoutes(allRoutes.map((r) => ({ ...r, route: [] })));
+      await Promise.all(
+        allRoutes.map(async (r, i) => {
+          await wait(i * 130);
+          if (cancelled) return;
+          await animateRouteReveal(
+            r.route,
+            650,
+            (partial) => {
+              setEvacRoutes((prev) =>
+                prev.map((p) => (p.rangerId === r.rangerId ? { ...p, route: partial } : p)),
+              );
+            },
+            () => cancelled,
+          );
+        }),
+      );
+      if (cancelled) return;
       log({
         sender: "PUSAT",
         color: "#66df75",
         lead: "RUTE DIKIRIM",
-        body: `rute terbaik (${(metersBetween(start, epicenter) / 1000).toFixed(1)}km) dikirim ke ${nearest.callsign}.`,
+        body: `${allRoutes.length} rute evakuasi dihitung, dikirim ke seluruh tim.`,
       });
-
-      await wait(600);
+      await wait(500);
       if (cancelled) return;
 
-      // 4. En route — animate along the route; a second victim may turn up along the way.
-      onPhaseChange("enroute", `${nearest.callsign} MENUJU LOKASI...`);
-      log({ sender: nearest.callsign, color: "#5fb3b3", lead: "BERANGKAT", body: "menuju lokasi kejadian." });
+      const start: [number, number] = [ranger.lat + nearest.offset[0], ranger.lon + nearest.offset[1]];
+      onPhaseChange("dispatch", `TERDEKAT: ${senderName} · MENGIRIM RUTE TERBAIK...`);
+      log({
+        sender: senderName,
+        color: "#5fb3b3",
+        lead: "PERINTAH DITERIMA",
+        body: "rute terbaik diterima, bersiap berangkat.",
+      });
+      map.flyTo(start, 16, { duration: 1.1 });
 
-      const totalSteps = routePoints.length - 1;
+      const rawRoute = allRoutes.find((r) => r.rangerId === nearest.id)?.route ?? buildFallbackRoute(start, epicenter);
+      const travelDurationMs = simulatedTravelDurationMs(rawRoute, 3600, 3600);
+      setDispatchedId(nearest.id);
+      setUnitPos(start);
+      setTrail([start]);
+      onProgress({ unitsDispatched: 1, totalUnits: RANGERS.length, etaMs: travelDurationMs });
+
+      // Trace the chosen route from start to end instead of it just appearing.
+      await animateRouteReveal(
+        rawRoute,
+        900,
+        (partial) => {
+          setRoute(partial);
+          setUnitPos(partial[partial.length - 1]);
+        },
+        () => cancelled,
+      );
+      if (cancelled) return;
+      log({
+        sender: "PUSAT",
+        color: "#66df75",
+        lead: "RUTE DIKIRIM",
+        body: `rute terbaik (${(metersBetween(start, epicenter) / 1000).toFixed(1)}km) dikirim ke ${senderName}.`,
+      });
+
+      await wait(300);
+      if (cancelled) return;
+
+      // 4. En route — glide smoothly along the route; a second victim may turn up along the way.
+      onPhaseChange("enroute", `${senderName} MENUJU LOKASI...`);
+      log({ sender: senderName, color: "#5fb3b3", lead: "BERANGKAT", body: "menuju lokasi kejadian." });
+
       let victimTriggered = false;
       let approachLogged = false;
       let victimLocation: [number, number] | null = null;
 
-      for (let i = 1; i <= totalSteps; i++) {
-        if (cancelled) return;
-        setUnitPos(routePoints[i]);
-        setTrail((prev) => [...prev.slice(-(TRAIL_LENGTH - 1)), routePoints[i]]);
-        onProgress({
-          unitsDispatched: 1,
-          totalUnits: MESH_NODES.length,
-          etaMs: (totalSteps - i) * STEP_MS,
-        });
-        const t = i / totalSteps;
-
-        if (!victimTriggered && t > 0.5) {
-          victimTriggered = true;
-          const victimPos: [number, number] = [epicenter[0] - 0.0015, epicenter[1] + 0.0018];
-          victimLocation = victimPos;
-          setVictim(victimPos);
-          log({
-            sender: "SISTEM",
-            color: "#fabd00",
-            lead: "TERDETEKSI",
-            body: "korban tambahan di dekat lokasi kejadian.",
+      await animateAlongRoute(
+        rawRoute,
+        travelDurationMs,
+        (pos, t) => {
+          setUnitPos(pos);
+          setTrail((prev) => [...prev.slice(-(TRAIL_LENGTH - 1)), pos]);
+          onProgress({
+            unitsDispatched: 1,
+            totalUnits: RANGERS.length,
+            etaMs: Math.max(0, travelDurationMs * (1 - t)),
           });
-        }
 
-        if (!approachLogged && t > 0.85) {
-          approachLogged = true;
-          const distance = Math.round(metersBetween(routePoints[i], epicenter));
-          log({
-            sender: nearest.callsign,
-            color: "#5fb3b3",
-            lead: "MENDEKATI",
-            body: `lokasi, kira-kira ${distance}m lagi.`,
-          });
-        }
+          if (!victimTriggered && t > 0.5) {
+            victimTriggered = true;
+            const victimPos: [number, number] = [epicenter[0] - 0.0015, epicenter[1] + 0.0018];
+            victimLocation = victimPos;
+            setVictim(victimPos);
+            log({
+              sender: "SISTEM",
+              color: "#fabd00",
+              lead: "TERDETEKSI",
+              body: "korban tambahan di dekat lokasi kejadian.",
+            });
+          }
 
-        await wait(STEP_MS);
-      }
+          if (!approachLogged && t > 0.85) {
+            approachLogged = true;
+            const distance = Math.round(metersBetween(pos, epicenter));
+            log({
+              sender: senderName,
+              color: "#5fb3b3",
+              lead: "MENDEKATI",
+              body: `lokasi, kira-kira ${distance}m lagi.`,
+            });
+          }
+        },
+        () => cancelled,
+      );
       if (cancelled) return;
 
       // 5. Arrived — tight cinematic push-in on the epicenter.
-      onPhaseChange("arrived", `${nearest.callsign} TIBA DI LOKASI`);
-      onProgress({ unitsDispatched: 1, totalUnits: MESH_NODES.length, etaMs: 0 });
-      log({ sender: nearest.callsign, color: "#5fb3b3", lead: "TIBA", body: "di lokasi. Memulai pencarian korban." });
+      onPhaseChange("arrived", `${senderName} TIBA DI LOKASI`);
+      onProgress({ unitsDispatched: 1, totalUnits: RANGERS.length, etaMs: 0 });
+      log({ sender: senderName, color: "#5fb3b3", lead: "TIBA", body: "di lokasi. Memulai pencarian korban." });
       map.flyTo(epicenter, 18, { duration: 1, easeLinearity: 0.15 });
       setTrail([]);
       await wait(1400);
@@ -534,7 +516,7 @@ function FlareSequence({
         sender: "PUSAT",
         color: "#66df75",
         lead: "TANYA",
-        body: `${nearest.callsign}, apakah perangkat Anda mendeteksi sinyal korban?`,
+        body: `${senderName}, apakah perangkat Anda mendeteksi sinyal korban?`,
       });
       await wait(1000);
       if (cancelled) return;
@@ -542,13 +524,13 @@ function FlareSequence({
       log(
         victimDistance !== null
           ? {
-              sender: nearest.callsign,
+              sender: senderName,
               color: "#fabd00",
               lead: "TERDETEKSI",
               body: `sinyal ponsel korban terbaca, perkiraan jarak ${victimDistance}m.`,
             }
           : {
-              sender: nearest.callsign,
+              sender: senderName,
               color: "#e5e2e1",
               lead: "NIHIL",
               body: "belum ada sinyal korban dalam jangkauan, mencari terus.",
@@ -559,10 +541,15 @@ function FlareSequence({
 
       // 6. Reporting — everyone else not dispatched checks in fine.
       onPhaseChange("reporting", "MENUNGGU LAPORAN SELURUH TIM...");
-      for (const node of MESH_NODES.filter((n) => n.id !== nearest.id)) {
+      for (const node of RANGERS.filter((n) => n.id !== nearest.id)) {
         if (cancelled) return;
         await wait(700);
-        log({ sender: node.callsign, color: "#e5e2e1", lead: "AMAN", body: "melanjutkan patroli, tidak ada temuan." });
+        log({
+          sender: `${node.name} (${node.callsign})`,
+          color: "#e5e2e1",
+          lead: "AMAN",
+          body: "melanjutkan patroli, tidak ada temuan.",
+        });
       }
       await wait(600);
       if (cancelled) return;
@@ -575,6 +562,7 @@ function FlareSequence({
         duration: 1.4,
       });
       setRoute(null);
+      setEvacRoutes([]);
       onPhaseChange("calm", "SEMUA TIM MELAPOR AMAN · PENCARIAN KORBAN BERLANJUT");
       log({
         sender: "PUSAT",
@@ -599,7 +587,17 @@ function FlareSequence({
           <Marker
             key={node.id}
             position={[ranger.lat + node.offset[0], ranger.lon + node.offset[1]]}
-            icon={buildMeshIcon(node.callsign)}
+            icon={buildRangerIcon(`${node.name} · BT`)}
+          />
+        ))}
+
+      {evacRoutes
+        .filter((r) => r.rangerId !== dispatchedId)
+        .map((r) => (
+          <Polyline
+            key={r.rangerId}
+            positions={r.route}
+            pathOptions={{ color: "#5fb3b3", weight: 2, opacity: 0.35, dashArray: "4 8" }}
           />
         ))}
 
@@ -628,7 +626,7 @@ function FlareSequence({
       {unitPos && dispatchedId && (
         <Marker
           position={unitPos}
-          icon={buildMeshIcon(MESH_NODES.find((n) => n.id === dispatchedId)?.callsign ?? "")}
+          icon={buildRangerIcon(RANGERS.find((n) => n.id === dispatchedId)?.name ?? "")}
         />
       )}
 
@@ -731,7 +729,7 @@ export function TacticalMapCanvas() {
   const [freeze, setFreeze] = useState(false);
   const [progress, setProgress] = useState<FlareProgress>({
     unitsDispatched: 0,
-    totalUnits: MESH_NODES.length,
+    totalUnits: RANGERS.length,
     etaMs: null,
   });
   const shakeControls = useAnimation();
@@ -807,6 +805,8 @@ export function TacticalMapCanvas() {
               <Marker position={[coords.lat, coords.lon]} icon={SELF_ICON} />
 
               <FocusableMarkers ranger={coords} phase={phase} />
+              <TaskMarkers />
+              <MessagePinMarkers />
 
               <FollowRanger lat={coords.lat} lon={coords.lon} enabled={phase === "idle"} />
               <FlareSequence
