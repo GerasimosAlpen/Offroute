@@ -2,13 +2,13 @@ import { useEffect, useState } from "preact/hooks";
 import { MapContainer, TileLayer, Marker, Polyline, CircleMarker, Popup, useMap } from "react-leaflet";
 import { motion, useAnimation, AnimatePresence } from "framer-motion";
 import L from "leaflet";
-import { Plus, Minus, LocateFixed } from "lucide-preact";
+import { Plus, Minus, LocateFixed, Check, X } from "lucide-preact";
 import type { LucideIcon } from "lucide-preact";
 import { useDeviceLocation } from "@/store/location";
 import { useFlareStore } from "@/store/flare";
 import { useCommsLogStore } from "@/store/commsLog";
 import { useBmkgQuake } from "@/store/bmkg";
-import { useTasksStore } from "@/store/tasks";
+import { useTasksStore, getRangerPosition } from "@/store/tasks";
 import { useMessagePinsStore } from "@/store/messagePins";
 import { RANGERS, type Ranger } from "@/lib/rangers";
 import { HAZARDS, type HazardKind } from "@/lib/hazards";
@@ -19,7 +19,10 @@ import {
   animateAlongRoute,
   animateRouteReveal,
   simulatedTravelDurationMs,
+  routeBlockedBy,
 } from "@/lib/routing";
+import { useEvacuationPointsStore } from "@/store/evacuationPoints";
+import { useEvacuationRequestsStore } from "@/store/evacuationRequests";
 import { SeismographReadout } from "./SeismographReadout";
 import { BmkgTicker } from "./BmkgTicker";
 import "@/lib/leaflet-setup";
@@ -137,6 +140,21 @@ const MESSAGE_PIN_ICON = L.divIcon({
   iconSize: [0, 0],
 });
 
+const EVAC_POINT_ICON = L.divIcon({
+  className: "",
+  html: `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-100%);">
+      <div style="position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:#131313;border:2px solid #66df75;border-radius:9999px;box-shadow:0 0 8px rgba(102,223,117,0.5);">
+        <div style="width:12px;height:12px;border-radius:9999px;background:#66df75;"></div>
+      </div>
+      <div style="background:#131313;border:1px solid #66df75;padding:2px 8px;white-space:nowrap;">
+        <span style="color:#66df75;font-family:'JetBrains Mono Variable',monospace;font-size:11px;text-transform:uppercase;">Titik Evakuasi Aman</span>
+      </div>
+    </div>
+  `,
+  iconSize: [0, 0],
+});
+
 function formatKoor(lat: number, lon: number) {
   const latHemi = lat >= 0 ? "N" : "S";
   const lonHemi = lon >= 0 ? "E" : "W";
@@ -214,12 +232,16 @@ function TaskMarkers() {
             : rangerProfile.name
           : "";
         const layers = [];
+        // Minor ad-hoc hazards (fire/crash/theft/etc.) are the routine, not
+        // the drama — kept thin and dim, not the bright flowing style
+        // reserved for major FLARE emergencies, and cleared entirely on
+        // arrival (see src/store/tasks.ts) rather than lingering.
         if (task.route.length > 1) {
           layers.push(
             <Polyline
               key={`${task.hazardId}-route`}
               positions={task.route}
-              pathOptions={{ color: "#66df75", weight: 3, dashArray: "10 8", className: "route-flow" }}
+              pathOptions={{ color: "#66df75", weight: 1.5, opacity: 0.4, dashArray: "4 6" }}
             />,
           );
         }
@@ -257,6 +279,46 @@ function MessagePinMarkers() {
           </Popup>
         </Marker>
       ))}
+    </>
+  );
+}
+
+/**
+ * Safe-zone points a ranger has pinged ("everyone here is okay"), plus the
+ * route from the incident to each one (`src/store/evacuationPoints.ts`).
+ */
+function EvacuationPointMarkers() {
+  const points = useEvacuationPointsStore((s) => s.points);
+  return (
+    <>
+      {points.flatMap((point) => {
+        const layers = [];
+        if (point.route.length > 1) {
+          layers.push(
+            <Polyline
+              key={`${point.id}-route`}
+              positions={point.route}
+              pathOptions={{ color: "#66df75", weight: 3, dashArray: "6 6", className: "route-flow" }}
+            />,
+          );
+        }
+        layers.push(
+          <Marker key={`${point.id}-marker`} position={[point.lat, point.lon]} icon={EVAC_POINT_ICON}>
+            <Popup>
+              <div className="font-mono text-xs flex flex-col gap-1">
+                <span className="font-bold text-[#131313]">
+                  {point.rangerName} · {point.callsign}
+                </span>
+                <span>Titik evakuasi aman — seluruh korban dalam kondisi baik.</span>
+                <span className="text-[10px] text-zinc-500">
+                  {new Date(point.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+            </Popup>
+          </Marker>,
+        );
+        return layers;
+      })}
     </>
   );
 }
@@ -300,8 +362,18 @@ function FlareSequence({
   const [unitPos, setUnitPos] = useState<[number, number] | null>(null);
   const [trail, setTrail] = useState<[number, number][]>([]);
   const [route, setRoute] = useState<[number, number][] | null>(null);
-  const [evacRoutes, setEvacRoutes] = useState<{ rangerId: string; route: [number, number][] }[]>([]);
+  const [evacRoutes, setEvacRoutes] = useState<
+    { rangerId: string; route: [number, number][]; blocked: boolean }[]
+  >([]);
   const [victim, setVictim] = useState<[number, number] | null>(null);
+
+  // Wherever a ranger actually is right now — shared with the ad-hoc task
+  // system (src/store/tasks.ts), so a ranger who's already moved via a
+  // "Kirim Unit" assignment doesn't reset to their static home spot the
+  // moment a FLARE fires (and vice versa). Kept at component scope (not just
+  // inside the effect) so the mesh-marker JSX below can use it too.
+  const posOf = (r: Ranger): [number, number] =>
+    getRangerPosition(r.id, [ranger.lat + r.offset[0], ranger.lon + r.offset[1]]);
 
   useEffect(() => {
     if (sequence === 0) return;
@@ -341,7 +413,7 @@ function FlareSequence({
       for (const node of RANGERS) {
         if (cancelled) return;
         setRevealedMesh((prev) => [...prev, node]);
-        bounds.extend([ranger.lat + node.offset[0], ranger.lon + node.offset[1]]);
+        bounds.extend(posOf(node));
         await wait(420);
       }
       if (cancelled) return;
@@ -355,19 +427,9 @@ function FlareSequence({
       await wait(1400);
       if (cancelled) return;
 
-      // 3. Dispatch — nearest team to the epicenter gets sent, but every
-      // team's possible evacuation route gets computed and shown, not just
-      // the chosen one.
-      const nearest = RANGERS.reduce(
-        (best, node) => {
-          const pos: [number, number] = [ranger.lat + node.offset[0], ranger.lon + node.offset[1]];
-          const d = metersBetween(pos, epicenter);
-          return d < best.d ? { node, d } : best;
-        },
-        { node: RANGERS[0], d: Infinity },
-      ).node;
-      const senderName = `${nearest.name} (${nearest.callsign})`;
-
+      // 3. Dispatch — every team's possible evacuation route gets computed
+      // and shown first, checked against known blocked roads, and *then*
+      // the best *available* (not just nearest) team gets sent.
       onPhaseChange("dispatch", "MENGHITUNG SEMUA RUTE EVAKUASI YANG MUNGKIN...");
       log({
         sender: "PUSAT",
@@ -376,14 +438,28 @@ function FlareSequence({
         body: "menghitung seluruh kemungkinan rute evakuasi untuk semua tim.",
       });
 
+      const blockedRoadPositions: [number, number][] = HAZARDS.filter((h) => h.kind === "blocked").map(
+        (h) => [ranger.lat + h.offset[0], ranger.lon + h.offset[1]] as [number, number],
+      );
+
       const allRoutes = await Promise.all(
         RANGERS.map(async (node) => {
-          const from: [number, number] = [ranger.lat + node.offset[0], ranger.lon + node.offset[1]];
+          const from: [number, number] = posOf(node);
           const r = (await fetchRoadRoute(from, epicenter)) ?? buildFallbackRoute(from, epicenter);
-          return { rangerId: node.id, route: r };
+          return { rangerId: node.id, route: r, blocked: routeBlockedBy(r, blockedRoadPositions) };
         }),
       );
       if (cancelled) return;
+
+      // Prefer an available (unblocked) route over a merely-shorter blocked one.
+      const nearest = RANGERS
+        .map((node) => {
+          const pos: [number, number] = posOf(node);
+          const routeInfo = allRoutes.find((r) => r.rangerId === node.id);
+          return { node, d: metersBetween(pos, epicenter), blocked: routeInfo?.blocked ?? false };
+        })
+        .sort((a, b) => Number(a.blocked) - Number(b.blocked) || a.d - b.d)[0].node;
+      const senderName = `${nearest.name} (${nearest.callsign})`;
 
       // Cascade them in one at a time rather than popping in all at once.
       setEvacRoutes(allRoutes.map((r) => ({ ...r, route: [] })));
@@ -404,16 +480,20 @@ function FlareSequence({
         }),
       );
       if (cancelled) return;
+      const blockedCount = allRoutes.filter((r) => r.blocked).length;
       log({
         sender: "PUSAT",
         color: "#66df75",
         lead: "RUTE DIKIRIM",
-        body: `${allRoutes.length} rute evakuasi dihitung, dikirim ke seluruh tim.`,
+        body:
+          blockedCount > 0
+            ? `${allRoutes.length} rute dihitung (${blockedCount} terblokir jalan rusak), dikirim ke seluruh tim.`
+            : `${allRoutes.length} rute evakuasi dihitung, semua tersedia, dikirim ke seluruh tim.`,
       });
       await wait(500);
       if (cancelled) return;
 
-      const start: [number, number] = [ranger.lat + nearest.offset[0], ranger.lon + nearest.offset[1]];
+      const start: [number, number] = posOf(nearest);
       onPhaseChange("dispatch", `TERDEKAT: ${senderName} · MENGIRIM RUTE TERBAIK...`);
       log({
         sender: senderName,
@@ -436,7 +516,9 @@ function FlareSequence({
         900,
         (partial) => {
           setRoute(partial);
-          setUnitPos(partial[partial.length - 1]);
+          const tip = partial[partial.length - 1];
+          setUnitPos(tip);
+          useTasksStore.getState().setRangerPosition(nearest.id, tip);
         },
         () => cancelled,
       );
@@ -465,6 +547,7 @@ function FlareSequence({
         (pos, t) => {
           setUnitPos(pos);
           setTrail((prev) => [...prev.slice(-(TRAIL_LENGTH - 1)), pos]);
+          useTasksStore.getState().setRangerPosition(nearest.id, pos);
           onProgress({
             unitsDispatched: 1,
             totalUnits: RANGERS.length,
@@ -499,12 +582,18 @@ function FlareSequence({
       );
       if (cancelled) return;
 
-      // 5. Arrived — tight cinematic push-in on the epicenter.
+      // 5. Arrived — tight cinematic push-in on the epicenter. Route's done
+      // its job leading the unit in, so it's cleared here (not left bright
+      // and drawn) and the ranger's position is pinned to where they actually
+      // are now — same pattern as the ad-hoc task system's arrival handling.
       onPhaseChange("arrived", `${senderName} TIBA DI LOKASI`);
       onProgress({ unitsDispatched: 1, totalUnits: RANGERS.length, etaMs: 0 });
       log({ sender: senderName, color: "#5fb3b3", lead: "TIBA", body: "di lokasi. Memulai pencarian korban." });
       map.flyTo(epicenter, 18, { duration: 1, easeLinearity: 0.15 });
       setTrail([]);
+      setRoute(null);
+      setUnitPos(epicenter);
+      useTasksStore.getState().setRangerPosition(nearest.id, epicenter);
       await wait(1400);
       if (cancelled) return;
 
@@ -539,6 +628,13 @@ function FlareSequence({
       await wait(1400);
       if (cancelled) return;
 
+      // 5c. Ranger *offers* their own position as a safe evacuation point —
+      // their call ("if they want to"), not automatic. Only meaningful for
+      // a major emergency like this one, never a minor ad-hoc hazard. No
+      // personel app exists yet, so this stands in for that tap; PUSAT
+      // (radar) still has to accept or reject it before anything's pinned.
+      useEvacuationRequestsStore.getState().request(nearest, epicenter, epicenter);
+
       // 6. Reporting — everyone else not dispatched checks in fine.
       onPhaseChange("reporting", "MENUNGGU LAPORAN SELURUH TIM...");
       for (const node of RANGERS.filter((n) => n.id !== nearest.id)) {
@@ -555,13 +651,12 @@ function FlareSequence({
       if (cancelled) return;
 
       // 7. Calm — alert stands down, but the search for the victim doesn't.
-      // The route stays drawn until now (not cleared at arrival) so radar
-      // can see the whole evacuation path that was actually taken.
+      // Route was already cleared back at arrival; this just clears the
+      // other teams' evacuation-route overlays.
       map.flyToBounds(L.latLngBounds([[ranger.lat, ranger.lon], epicenter]), {
         padding: [80, 80],
         duration: 1.4,
       });
-      setRoute(null);
       setEvacRoutes([]);
       onPhaseChange("calm", "SEMUA TIM MELAPOR AMAN · PENCARIAN KORBAN BERLANJUT");
       log({
@@ -586,7 +681,7 @@ function FlareSequence({
         .map((node) => (
           <Marker
             key={node.id}
-            position={[ranger.lat + node.offset[0], ranger.lon + node.offset[1]]}
+            position={posOf(node)}
             icon={buildRangerIcon(`${node.name} · BT`)}
           />
         ))}
@@ -597,7 +692,11 @@ function FlareSequence({
           <Polyline
             key={r.rangerId}
             positions={r.route}
-            pathOptions={{ color: "#5fb3b3", weight: 2, opacity: 0.35, dashArray: "4 8" }}
+            pathOptions={
+              r.blocked
+                ? { color: "#ff0040", weight: 2, opacity: 0.4, dashArray: "2 6" }
+                : { color: "#5fb3b3", weight: 2, opacity: 0.35, dashArray: "4 8" }
+            }
           />
         ))}
 
@@ -722,6 +821,9 @@ export function TacticalMapCanvas() {
   const { coords } = useDeviceLocation();
   const { sequence: flareSequence } = useFlareStore();
   const { quake } = useBmkgQuake();
+  const pendingEvacRequests = useEvacuationRequestsStore((s) => s.pending);
+  const acceptEvacRequest = useEvacuationRequestsStore((s) => s.accept);
+  const rejectEvacRequest = useEvacuationRequestsStore((s) => s.reject);
   const [phase, setPhase] = useState<FlarePhase>("idle");
   const [banner, setBanner] = useState<string | null>(null);
   const [showFlash, setShowFlash] = useState(false);
@@ -807,6 +909,7 @@ export function TacticalMapCanvas() {
               <FocusableMarkers ranger={coords} phase={phase} />
               <TaskMarkers />
               <MessagePinMarkers />
+              <EvacuationPointMarkers />
 
               <FollowRanger lat={coords.lat} lon={coords.lon} enabled={phase === "idle"} />
               <FlareSequence
@@ -907,6 +1010,45 @@ export function TacticalMapCanvas() {
               <span className="font-mono text-[11px] text-[#fabd00] tracking-[1.5px] uppercase whitespace-nowrap">
                 {banner}
               </span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
+          {pendingEvacRequests.length > 0 && (
+            <motion.div
+              key="evac-requests"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              className="absolute bottom-3 right-3 z-[1000] flex flex-col gap-2 max-w-[260px]"
+            >
+              {pendingEvacRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="bg-[#131313] border border-[#66df75] px-3 py-2 flex flex-col gap-1.5"
+                >
+                  <span className="font-mono text-[10px] text-[#66df75] uppercase tracking-[1px]">
+                    {req.ranger.name} ({req.ranger.callsign}) · Ajukan Titik Evakuasi
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void acceptEvacRequest(req.id)}
+                      className="flex-1 flex items-center justify-center gap-1 border border-[#66df75] bg-[#66df75]/10 text-[#66df75] text-[10px] uppercase px-2 py-1"
+                    >
+                      <Check size={11} /> Terima
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => rejectEvacRequest(req.id)}
+                      className="flex-1 flex items-center justify-center gap-1 border border-[#ff0040] bg-[#ff0040]/10 text-[#ff0040] text-[10px] uppercase px-2 py-1"
+                    >
+                      <X size={11} /> Tolak
+                    </button>
+                  </div>
+                </div>
+              ))}
             </motion.div>
           )}
         </AnimatePresence>

@@ -11,6 +11,15 @@ function routeLengthMeters(points: [number, number][]) {
   return total;
 }
 
+/** Whether a route passes near any known blocker (e.g. a blocked-road hazard) — so "which route is actually available" is a real check, not just "which is shortest." */
+export function routeBlockedBy(
+  route: [number, number][],
+  blockers: [number, number][],
+  thresholdMeters = 60,
+): boolean {
+  return route.some((point) => blockers.some((blocker) => metersBetween(point, blocker) < thresholdMeters));
+}
+
 function cumulativeDistances(route: [number, number][]) {
   const cumulative: number[] = [0];
   for (let i = 1; i < route.length; i++) {

@@ -13,6 +13,7 @@ const SEVERITY_COLOR: Record<HazardSeverity, string> = {
 export function HazardStatusPanel() {
   const { coords } = useDeviceLocation();
   const tasks = useTasksStore((s) => s.tasks);
+  const resolvedHazards = useTasksStore((s) => s.resolvedHazards);
   const assign = useTasksStore((s) => s.assign);
 
   return (
@@ -27,7 +28,14 @@ export function HazardStatusPanel() {
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
         {HAZARDS.map((hazard) => {
           const task = tasks[hazard.id];
-          const rangerProfile = task ? RANGERS.find((r) => r.id === task.rangerId) : undefined;
+          const resolved = resolvedHazards[hazard.id];
+          // Live task takes priority (has a real-time position); a resolved
+          // hazard whose ranger has since moved on to something else still
+          // shows who handled it, just without the "mark evac point" action
+          // (that needs the ranger's *current* position, which we no longer
+          // track here once they've left).
+          const rangerId = task?.rangerId ?? resolved?.rangerId;
+          const rangerProfile = rangerId ? RANGERS.find((r) => r.id === rangerId) : undefined;
 
           return (
             <div
@@ -48,9 +56,11 @@ export function HazardStatusPanel() {
 
               {rangerProfile ? (
                 <p className="text-[#5fb3b3] text-xs pt-1 uppercase tracking-[0.5px]">
-                  {task!.status === "arrived"
-                    ? `${rangerProfile.name} (${rangerProfile.callsign}) tiba di lokasi`
-                    : `${rangerProfile.name} (${rangerProfile.callsign}) menuju lokasi...`}
+                  {task
+                    ? task.status === "arrived"
+                      ? `${rangerProfile.name} (${rangerProfile.callsign}) tiba di lokasi`
+                      : `${rangerProfile.name} (${rangerProfile.callsign}) menuju lokasi...`
+                    : `Diselesaikan oleh ${rangerProfile.name} (${rangerProfile.callsign})`}
                 </p>
               ) : (
                 <div className="flex gap-2 pt-2">

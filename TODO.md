@@ -239,10 +239,115 @@ has real first names (Budi/Siti/Andi/Dewi) alongside the existing "TIM
 BRAVO"-style callsigns, specifically so comms log/status text can say "Budi
 (TIM BRAVO)" — matches how the feature was actually asked for.
 
+**Minor incidents stay quiet, not catchy:** ad-hoc task routes
+(`TaskMarkers` in `TacticalMapCanvas.tsx`) dropped the bright flowing
+`route-flow` dash animation for a thin, dim, static line (`weight: 1.5,
+opacity: 0.4`) — a house fire or a theft report shouldn't visually compete
+with an actual earthquake drill. `FlareSequence`'s own route keeps the
+bright/animated treatment; that's the one emergency worth being loud about.
+
 Still simulated: no real task/assignment backend (see Backend section) —
 `assign()` picks the nearest ranger locally and that's it, nothing is
 persisted or broadcast. Real version needs the backend task model + WS
 broadcast described above.
+
+### Three real bugs found and fixed here — same mistakes to avoid in the real backend
+
+Genuine logic bugs (the first two in `src/store/tasks.ts`, the third
+spanning it and `FlareSequence`), not just simulation gaps — exactly the
+kind of thing to get right the first time when the real task/assignment
+backend gets built (see Backend section above):
+
+1. **"Busy" never cleared.** `assign()` originally computed which rangers
+   were unavailable from *every* task that had ever existed, regardless of
+   status — so a ranger who'd already arrived and finished stayed
+   permanently "busy" and could never be assigned again. Fixed by only
+   counting tasks with `status === "enroute"` as making a ranger
+   unavailable. **Backend equivalent: a ranger's availability must be
+   derived from their current/active assignment state, never from a growing
+   historical log of past assignments** — if the real API models this as
+   "does this ranger have any assignment record," it'll have the same bug.
+2. **New tasks started from a stale position.** `assign()` always
+   recomputed a ranger's starting point from their static home offset
+   (`RANGERS[i].offset`), so a ranger sent on a second task would visually
+   teleport back to their original spot instead of starting from wherever
+   their first task actually left them. Fixed with `rangerLastKnownPos`, a
+   separate map updated continuously (not just on arrival) and consulted
+   first when picking a start position. **Backend equivalent: dispatch
+   logic must query the ranger's latest known real-time position, never a
+   cached/static "home" location** — this is exactly the kind of bug that's
+   invisible in a demo with one task at a time and only shows up once
+   someone takes a second assignment, so it's worth testing explicitly.
+3. **Two systems, two disagreeing ideas of "where is ranger X."** The FLARE
+   drill (`FlareSequence`, inside `TacticalMapCanvas.tsx`) computed every
+   ranger's position purely from their static `RANGERS[i].offset`, never
+   consulting `rangerLastKnownPos` — so a ranger already moved by an ad-hoc
+   "Kirim Unit" task would appear to teleport back to their original spot
+   the moment FLARE fired, FLARE's own "nearest ranger" pick would be wrong
+   (picking someone far away over someone who'd literally just finished a
+   task next door), and clicking FLARE used the ranger's old position
+   instead of wherever they actually were. Fixed by exporting
+   `getRangerPosition(rangerId, fallback)` and a `setRangerPosition(rangerId,
+   pos)` action from `src/store/tasks.ts`, and having `FlareSequence` read
+   through a local `posOf()` wrapper (instead of raw offset math) everywhere
+   it used to compute a ranger's position, plus write back into the same
+   store on every reveal/travel tick and on arrival. Also moved the route
+   clear from the "calm" phase to the moment of arrival, so a finished
+   FLARE-dispatched unit's route disappears immediately instead of staying
+   drawn — matching how `tasks.ts` already behaved for ad-hoc assignments.
+   **Backend equivalent: "current ranger position" must be ONE piece of
+   state with one owner, read by every feature that dispatches or displays
+   rangers — never let a second feature (a drill mode, an admin override,
+   whatever) maintain its own parallel idea of where someone is.** Two
+   independent systems computing "current position" from different sources
+   of truth will silently disagree the moment a ranger's real position
+   diverges from either one's assumed starting point.
+
+A related, deliberate design split introduced while fixing #1: `tasks`
+(live, cleared once a ranger moves to a new job) vs. `resolvedHazards`
+(permanent record of who resolved what, in `src/store/tasks.ts`) — needed so
+that clearing a stale live-position marker doesn't also erase the sidebar's
+memory that a hazard was already handled. The real backend will need the
+same split: "current live assignment" and "historical resolution record"
+are different data, not the same table queried differently.
+
+## Evacuation points — ranger-pinged safe zones, built (simulated)
+
+Reworked from a one-click radar-side button into an actual request/response
+flow, and scoped to major emergencies only:
+
+- **Personel side (`src/store/evacuationRequests.ts`), "if they want to":**
+  a ranger *offers* their current position as a safe evacuation point — not
+  automatic, their call. Only fires from `FlareSequence` (major emergency —
+  earthquake/tsunami/typhoon drill), never from the ad-hoc minor-hazard task
+  system (`HazardStatusPanel.tsx` no longer has any evac-point action at
+  all — status text only). No personel app exists yet, so the request is
+  simulated at the point in the drill where the dispatched ranger would
+  plausibly make that offer; a real personel client would trigger `request()`
+  from an actual button tap.
+- **Radar side:** the offer shows as a pending card (bottom-right of the map,
+  `TacticalMapCanvas.tsx`) with **Terima**/**Tolak** (accept/reject). Reject
+  just dismisses it and logs the refusal. Accept calls into
+  `src/store/evacuationPoints.ts` → `mark()`, which pins the safe-zone marker
+  and draws + animates a real route from the incident to that point (reusing
+  `animateRouteReveal`, same as everything else), logged to Comm Center.
+
+## Route availability — "which one can they actually take"
+
+`FlareSequence`'s "every possible evacuation route" (built last round) now
+actually checks availability instead of just showing every route as equally
+viable: `routeBlockedBy()` in `src/lib/routing.ts` checks whether a
+candidate route passes within 60m of a known `blocked`-kind hazard (the
+`JALUR PUTUS` one). Blocked routes render in red/dashed instead of the
+default dim teal, and the dispatch logic now prefers an *available* route
+over a merely-shorter blocked one when picking who to send. Comms log
+reports how many of the computed routes were blocked.
+
+**Still a proximity heuristic, not real road-network awareness** — it
+checks distance-to-hazard-point along the route, not "does this specific
+road segment pass through the blockage." Good enough for the demo's scale;
+a real version needs actual road-graph knowledge (ties into the offline
+routing/Dijkstra note in the Backend (Tauri) section).
 
 ## Personel status messages as map pins — built (simulated trigger)
 
