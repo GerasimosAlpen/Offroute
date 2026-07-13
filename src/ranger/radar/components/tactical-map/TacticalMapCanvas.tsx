@@ -20,6 +20,8 @@ interface HazardMarker {
   /** [lat, lon] offset from the ranger's own position. */
   offset: [number, number];
   icon: L.DivIcon;
+  /** Shrunk, label-less version shown while a major FLARE is active, so it doesn't compete for attention. */
+  iconMinimized: L.DivIcon;
 }
 
 const HAZARD_STYLE: Record<HazardKind, { color: string; shadow: string; diamond?: boolean }> = {
@@ -30,18 +32,24 @@ const HAZARD_STYLE: Record<HazardKind, { color: string; shadow: string; diamond?
   theft: { color: "#a78bfa", shadow: "rgba(167,139,250,0.4)" },
 };
 
-function buildHazardIcon(kind: HazardKind, label: string) {
+function buildHazardIcon(kind: HazardKind, label: string, minimized = false) {
   const { color, shadow, diamond } = HAZARD_STYLE[kind];
+  const size = minimized ? 16 : 32;
+  const dot = minimized ? 6 : 10;
   return L.divIcon({
     className: "",
     html: `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-100%);">
-        <div style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;background:#262626;border:2px solid ${color};box-shadow:0 0 7.5px ${shadow};border-radius:${diamond ? "4px" : "9999px"};transform:${diamond ? "rotate(45deg)" : "none"};">
-          <div style="width:10px;height:10px;border-radius:9999px;background:${color};${diamond ? "transform:rotate(-45deg);" : ""}"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-100%);opacity:${minimized ? 0.45 : 1};">
+        <div style="display:flex;align-items:center;justify-content:center;width:${size}px;height:${size}px;background:#262626;border:2px solid ${color};box-shadow:0 0 7.5px ${shadow};border-radius:${diamond ? "4px" : "9999px"};transform:${diamond ? "rotate(45deg)" : "none"};">
+          <div style="width:${dot}px;height:${dot}px;border-radius:9999px;background:${color};${diamond ? "transform:rotate(-45deg);" : ""}"></div>
         </div>
-        <div style="background:#131313;border:1px solid ${color};padding:2px 8px;white-space:nowrap;">
+        ${
+          minimized
+            ? ""
+            : `<div style="background:#131313;border:1px solid ${color};padding:2px 8px;white-space:nowrap;">
           <span style="color:${color};font-family:'JetBrains Mono Variable',monospace;font-size:11px;text-transform:uppercase;">${label}</span>
-        </div>
+        </div>`
+        }
       </div>
     `,
     iconSize: [0, 0],
@@ -56,13 +64,45 @@ function buildHazardIcon(kind: HazardKind, label: string) {
 //
 // These stay on the map in every phase, including idle — they're the
 // day-to-day minor stuff (fire, crash, theft) the radar operator keeps an
-// eye on when there's no active FLARE, not part of the drill sequence.
+// eye on when there's no active FLARE, not part of the drill sequence. They
+// shrink (see iconMinimized) rather than disappear while a FLARE is active,
+// so radar still knows they're there without them competing for attention.
 const MOCK_HAZARDS: HazardMarker[] = [
-  { id: "a01", label: "A01 - API", offset: [0.004, -0.002], icon: buildHazardIcon("fire", "A01 - API") },
-  { id: "road1", label: "JALUR PUTUS", offset: [-0.003, 0.005], icon: buildHazardIcon("blocked", "JALUR PUTUS") },
-  { id: "med1", label: "EVAK MEDIS", offset: [-0.001, -0.006], icon: buildHazardIcon("medical", "EVAK MEDIS") },
-  { id: "crash1", label: "KECELAKAAN", offset: [0.0025, 0.0075], icon: buildHazardIcon("crash", "KECELAKAAN") },
-  { id: "theft1", label: "LAPORAN PENCURIAN", offset: [-0.006, 0.0015], icon: buildHazardIcon("theft", "LAPORAN PENCURIAN") },
+  {
+    id: "a01",
+    label: "A01 - API",
+    offset: [0.004, -0.002],
+    icon: buildHazardIcon("fire", "A01 - API"),
+    iconMinimized: buildHazardIcon("fire", "A01 - API", true),
+  },
+  {
+    id: "road1",
+    label: "JALUR PUTUS",
+    offset: [-0.003, 0.005],
+    icon: buildHazardIcon("blocked", "JALUR PUTUS"),
+    iconMinimized: buildHazardIcon("blocked", "JALUR PUTUS", true),
+  },
+  {
+    id: "med1",
+    label: "EVAK MEDIS",
+    offset: [-0.001, -0.006],
+    icon: buildHazardIcon("medical", "EVAK MEDIS"),
+    iconMinimized: buildHazardIcon("medical", "EVAK MEDIS", true),
+  },
+  {
+    id: "crash1",
+    label: "KECELAKAAN",
+    offset: [0.0025, 0.0075],
+    icon: buildHazardIcon("crash", "KECELAKAAN"),
+    iconMinimized: buildHazardIcon("crash", "KECELAKAAN", true),
+  },
+  {
+    id: "theft1",
+    label: "LAPORAN PENCURIAN",
+    offset: [-0.006, 0.0015],
+    icon: buildHazardIcon("theft", "LAPORAN PENCURIAN"),
+    iconMinimized: buildHazardIcon("theft", "LAPORAN PENCURIAN", true),
+  },
 ];
 
 const SELF_ICON = L.divIcon({
@@ -258,9 +298,19 @@ interface FlareProgress {
  * automatic so it doesn't yank the view around on its own for the always-on
  * minor hazards.
  */
+const ACTIVE_DRILL_PHASES: FlarePhase[] = [
+  "detect",
+  "scan",
+  "dispatch",
+  "enroute",
+  "arrived",
+  "reporting",
+];
+
 function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: number }; phase: FlarePhase }) {
   const map = useMap();
   const focus = (pos: [number, number]) => map.flyTo(pos, 18, { duration: 1 });
+  const minimizeMinorHazards = ACTIVE_DRILL_PHASES.includes(phase);
 
   return (
     <>
@@ -270,7 +320,7 @@ function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: numbe
           <Marker
             key={hazard.id}
             position={pos}
-            icon={hazard.icon}
+            icon={minimizeMinorHazards ? hazard.iconMinimized : hazard.icon}
             eventHandlers={{ click: () => focus(pos) }}
           />
         );
@@ -409,6 +459,12 @@ function FlareSequence({
       setUnitPos(start);
       setTrail([start]);
       onProgress({ unitsDispatched: 1, totalUnits: MESH_NODES.length, etaMs: totalTravelMs });
+      log({
+        sender: "PUSAT",
+        color: "#66df75",
+        lead: "RUTE DIKIRIM",
+        body: `rute terbaik (${(metersBetween(start, epicenter) / 1000).toFixed(1)}km) dikirim ke ${nearest.callsign}.`,
+      });
 
       await wait(600);
       if (cancelled) return;
@@ -420,6 +476,7 @@ function FlareSequence({
       const totalSteps = routePoints.length - 1;
       let victimTriggered = false;
       let approachLogged = false;
+      let victimLocation: [number, number] | null = null;
 
       for (let i = 1; i <= totalSteps; i++) {
         if (cancelled) return;
@@ -435,6 +492,7 @@ function FlareSequence({
         if (!victimTriggered && t > 0.5) {
           victimTriggered = true;
           const victimPos: [number, number] = [epicenter[0] - 0.0015, epicenter[1] + 0.0018];
+          victimLocation = victimPos;
           setVictim(victimPos);
           log({
             sender: "SISTEM",
@@ -464,9 +522,39 @@ function FlareSequence({
       onProgress({ unitsDispatched: 1, totalUnits: MESH_NODES.length, etaMs: 0 });
       log({ sender: nearest.callsign, color: "#5fb3b3", lead: "TIBA", body: "di lokasi. Memulai pencarian korban." });
       map.flyTo(epicenter, 18, { duration: 1, easeLinearity: 0.15 });
-      setRoute(null);
       setTrail([]);
-      await wait(1800);
+      await wait(1400);
+      if (cancelled) return;
+
+      // 5b. Radar can't see the victim directly — the only realtime signal
+      // is whatever the dispatched personel's own phone can pick up (see
+      // TODO.md for the offline-beacon approach this is standing in for).
+      // So radar asks, personel answers with whatever their hardware found.
+      log({
+        sender: "PUSAT",
+        color: "#66df75",
+        lead: "TANYA",
+        body: `${nearest.callsign}, apakah perangkat Anda mendeteksi sinyal korban?`,
+      });
+      await wait(1000);
+      if (cancelled) return;
+      const victimDistance = victimLocation ? Math.round(metersBetween(epicenter, victimLocation)) : null;
+      log(
+        victimDistance !== null
+          ? {
+              sender: nearest.callsign,
+              color: "#fabd00",
+              lead: "TERDETEKSI",
+              body: `sinyal ponsel korban terbaca, perkiraan jarak ${victimDistance}m.`,
+            }
+          : {
+              sender: nearest.callsign,
+              color: "#e5e2e1",
+              lead: "NIHIL",
+              body: "belum ada sinyal korban dalam jangkauan, mencari terus.",
+            },
+      );
+      await wait(1400);
       if (cancelled) return;
 
       // 6. Reporting — everyone else not dispatched checks in fine.
@@ -480,10 +568,13 @@ function FlareSequence({
       if (cancelled) return;
 
       // 7. Calm — alert stands down, but the search for the victim doesn't.
+      // The route stays drawn until now (not cleared at arrival) so radar
+      // can see the whole evacuation path that was actually taken.
       map.flyToBounds(L.latLngBounds([[ranger.lat, ranger.lon], epicenter]), {
         padding: [80, 80],
         duration: 1.4,
       });
+      setRoute(null);
       onPhaseChange("calm", "SEMUA TIM MELAPOR AMAN · PENCARIAN KORBAN BERLANJUT");
       log({
         sender: "PUSAT",
@@ -627,7 +718,6 @@ function ShockwaveRing({ delay = 0 }: { delay?: number }) {
   );
 }
 
-const BIG_BANNER_PHASES: FlarePhase[] = ["detect", "scan", "dispatch", "enroute", "arrived", "reporting"];
 const DEFAULT_MAGNITUDE = 6.2;
 
 export function TacticalMapCanvas() {
@@ -681,7 +771,7 @@ export function TacticalMapCanvas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, flareSequence]);
 
-  const showBigBanner = BIG_BANNER_PHASES.includes(phase);
+  const showBigBanner = ACTIVE_DRILL_PHASES.includes(phase);
   const showCalmBadge = phase === "calm";
   const showHud = phase !== "idle";
 

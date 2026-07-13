@@ -184,3 +184,101 @@ view, since this repo is a Tauri *desktop* app. Nothing to build on the radar
 side for this; don't fake hardware-control UI on the desktop map, since the
 desktop has none of the phone's hardware to control. Revisit once the
 personel platform decision is made.
+
+## FLARE sequence, round 3 additions
+
+- Route now stays drawn through arrival + reporting, only cleared once the
+  drill settles to "calm" — so radar can see the whole path actually taken,
+  not just while the unit is mid-transit.
+- Minor/ambient hazards (`MOCK_HAZARDS`) shrink to a small, label-less,
+  45%-opacity version (`iconMinimized`) while a FLARE is actively unfolding
+  (`ACTIVE_DRILL_PHASES`), and return to full size once it settles to "calm"
+  — so they don't compete for attention during the real emergency, without
+  fully disappearing.
+- Dispatch now logs an explicit "RUTE DIKIRIM" (route sent) message, and
+  arrival is followed by a simulated ask/answer: radar asks the dispatched
+  personel whether their device detects the victim's signal, personel
+  answers with a distance if the (simulated) victim is nearby. This is the
+  narrative stand-in for the real hardware-detection question below — it's
+  comms-log text, not an actual detection system.
+
+## Victim/personel phone-as-beacon, offline — architecture notes (not started)
+
+The ask: when a personel or victim's phone loses connectivity (buried, stuck,
+no signal), can their phone still act as a locatable "flare" that other
+personel or radar can find? Real challenge is doing this with **zero
+internet/cell** — the phone still has Bluetooth even with no network.
+
+**This is a solved problem shape, not a novel one** — same pattern as:
+- Apple's **Find My network** / Android's **Find My Device network**:
+  devices broadcast anonymized BLE advertisements; any nearby device
+  (belonging to anyone) opportunistically relays "I saw this beacon here"
+  once *it* regains connectivity.
+- Avalanche transceivers: constant low-power beacon + a "getting
+  warmer/colder" RSSI-based search UI on the rescuer's receiver.
+- Disaster-mesh chat apps (Bridgefy, goTenna, old FireChat): multi-hop
+  store-and-forward over BLE/WiFi-Direct when no infrastructure is up.
+
+**Layered approach if this gets built:**
+1. **Victim/personel phone, "beacon mode"** — on losing connectivity (or a
+   manual SOS button), start broadcasting a low-power BLE advertisement
+   (rotating anonymized ID + last known GPS fix + battery %). Must work with
+   the screen off — this is a peripheral/advertising role, not scanning.
+2. **Rescuer (personel) phone, continuous scan** — background BLE central
+   role, logs every beacon sighting with RSSI + timestamp, surfaces a
+   "closer/further" search UI (the avalanche-transceiver UX). This is what
+   "radar asks personel if their phone detects the victim's signal" (just
+   simulated above) would actually be asking about.
+3. **Store-and-forward relay back to radar** — if personel is also offline,
+   "found beacon X near Y" has to hop device-to-device (same Bluetooth mesh
+   already planned for personel↔radar comms) until it reaches something with
+   connectivity. Classic delay-tolerant networking; not realtime, but
+   eventually-consistent.
+
+**Tauri-specific reality check:**
+- **Desktop side** (radar, and personel *if* it ends up desktop): `btleplug`
+  (the Rust crate already flagged in `CLAUDE.md`'s Bluetooth research spike)
+  gives real cross-platform BLE central/scanning support. This part is
+  genuinely feasible with what's already identified.
+- **True phone-in-pocket beaconing is mobile-only territory**, and:
+  - No official Tauri Bluetooth plugin exists for peripheral *or* central
+    mode on iOS/Android — would need a custom native plugin (Swift/
+    CoreBluetooth on iOS, Kotlin BLE APIs on Android) wrapped through Tauri's
+    plugin system. Real engineering work, not configuration.
+  - **iOS enforces hard platform restrictions on background BLE
+    advertising/scanning that no framework can bypass** — this is an Apple
+    policy limit, not a Tauri gap. Android is more permissive but still has
+    background-execution limits (Doze mode, etc., since Android 8).
+  - Tauri v2 *does* support compiling to iOS/Android, which is worth
+    factoring into the still-open personel platform decision — but "Tauri
+    supports mobile" doesn't mean "Tauri has a Bluetooth beacon plugin
+    ready to use." It doesn't; one would need to be built.
+  - **Web Bluetooth is not an option here at all** — it only supports the
+    central/scanning role, never peripheral/advertising, and isn't available
+    in iOS WKWebView regardless. A pure-JS/webview approach can't do the
+    "victim phone broadcasts" half of this no matter what.
+
+**Recommendation:** don't build this now — it's a real, sizable feature (a
+custom native BLE plugin) layered on top of the already-deferred Bluetooth
+mesh spike, and it depends on the personel platform decision being made
+first (the answer changes what's even possible). When that decision happens,
+fold this specific beacon/scan/relay requirement into that spike's scope
+rather than treating it as a separate ask.
+
+**Fallback floor, regardless of whether beacon-detection ever gets built:**
+victim-beacon detection (tier 2 above) is the stretch goal and may turn out
+to be too constrained by iOS's background-BLE limits to fully deliver. That
+should not block the simpler, guaranteed baseline — **plain Bluetooth
+data/text communication between personel↔personel and personel↔radar when
+internet is down**, which is the original README requirement and is
+meaningfully easier:
+- Doesn't need background/screen-off peripheral advertising — both ends have
+  the app open and Bluetooth on, exchanging structured messages (status
+  updates, GPS pings, short text) over a direct BLE GATT connection or
+  classic Bluetooth serial. This is a normal foreground BLE connection, not
+  fighting iOS's background restrictions the way beacon-mode would.
+- This is the actual floor the roadmap already commits to (CLAUDE.md:
+  "offline mode... changing into bluetooth to send all of the data across").
+  Build *this* first when the Bluetooth spike gets scoped; treat
+  beacon/victim-detection as an enhancement on top once the base comms
+  channel works, not a prerequisite for it.
