@@ -366,6 +366,17 @@ function FlareSequence({
     { rangerId: string; route: [number, number][]; blocked: boolean }[]
   >([]);
   const [victim, setVictim] = useState<[number, number] | null>(null);
+  // Every other available (not already busy on an ad-hoc task) ranger,
+  // dispatched to help search once the primary unit is enroute — keyed by
+  // ranger id so each can glide independently.
+  const [backupUnits, setBackupUnits] = useState<
+    Record<string, { pos: [number, number]; route: [number, number][] }>
+  >({});
+  // Which backup unit (if any) has its route line shown + camera focus.
+  // Only one at a time on purpose — with several units moving at once,
+  // showing every route simultaneously turns into an unreadable tangle of
+  // waypoints, so routes stay hidden until the operator picks one.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   // Wherever a ranger actually is right now — shared with the ad-hoc task
   // system (src/store/tasks.ts), so a ranger who's already moved via a
@@ -394,6 +405,8 @@ function FlareSequence({
       setRoute(null);
       setEvacRoutes([]);
       setVictim(null);
+      setBackupUnits({});
+      setFocusedId(null);
       onProgress({ unitsDispatched: 0, totalUnits: RANGERS.length, etaMs: null });
 
       // 0. Freeze-frame beat — a held breath before everything cuts loose.
@@ -635,19 +648,68 @@ function FlareSequence({
       // (radar) still has to accept or reject it before anything's pinned.
       useEvacuationRequestsStore.getState().request(nearest, epicenter, epicenter);
 
-      // 6. Reporting — everyone else not dispatched checks in fine.
-      onPhaseChange("reporting", "MENUNGGU LAPORAN SELURUH TIM...");
-      for (const node of RANGERS.filter((n) => n.id !== nearest.id)) {
+      // 6. Reporting — everyone else who's actually free (not already tied
+      // up on an ad-hoc task) heads to the emergency too, to help search for
+      // more victims, instead of just radioing in that they're fine from
+      // wherever they already were.
+      onPhaseChange("reporting", "SELURUH UNIT TERSEDIA BERGERAK MEMBANTU PENCARIAN...");
+      const busyRangerIds = new Set(
+        Object.values(useTasksStore.getState().tasks)
+          .filter((t) => t.status === "enroute")
+          .map((t) => t.rangerId),
+      );
+      const backupNodes = RANGERS.filter((n) => n.id !== nearest.id && !busyRangerIds.has(n.id));
+
+      for (const node of backupNodes) {
         if (cancelled) return;
-        await wait(700);
+        await wait(350);
         log({
           sender: `${node.name} (${node.callsign})`,
           color: "#e5e2e1",
-          lead: "AMAN",
-          body: "melanjutkan patroli, tidak ada temuan.",
+          lead: "BERGERAK",
+          body: "ikut menuju lokasi, membantu pencarian korban.",
         });
       }
-      await wait(600);
+
+      // Each backup unit scatters slightly around the epicenter (searching a
+      // wider area, not stacking on the exact same spot) and glides there
+      // independently, in the background — the main sequence below (arrival
+      // push-in, calm-down) doesn't wait on them finishing.
+      void Promise.all(
+        backupNodes.map(async (node, i) => {
+          const scatter: [number, number] = [
+            epicenter[0] + (i % 2 === 0 ? 1 : -1) * 0.0009,
+            epicenter[1] + (i % 3 === 0 ? -1 : 1) * 0.0009,
+          ];
+          const start = posOf(node);
+          const backupRoute = (await fetchRoadRoute(start, scatter)) ?? buildFallbackRoute(start, scatter);
+          if (cancelled) return;
+          setBackupUnits((prev) => ({ ...prev, [node.id]: { pos: start, route: backupRoute } }));
+
+          const durationMs = simulatedTravelDurationMs(backupRoute, 2500, 6000);
+          await animateAlongRoute(
+            backupRoute,
+            durationMs,
+            (pos) => {
+              setBackupUnits((prev) => ({ ...prev, [node.id]: { pos, route: backupRoute } }));
+              useTasksStore.getState().setRangerPosition(node.id, pos);
+            },
+            () => cancelled,
+          );
+          if (cancelled) return;
+
+          setBackupUnits((prev) => ({ ...prev, [node.id]: { pos: scatter, route: [] } }));
+          useTasksStore.getState().setRangerPosition(node.id, scatter);
+          log({
+            sender: `${node.name} (${node.callsign})`,
+            color: "#5fb3b3",
+            lead: "TIBA",
+            body: "tiba di sekitar lokasi, membantu pencarian korban tambahan.",
+          });
+        }),
+      );
+
+      await wait(400);
       if (cancelled) return;
 
       // 7. Calm — alert stands down, but the search for the victim doesn't.
@@ -677,7 +739,7 @@ function FlareSequence({
   return (
     <>
       {revealedMesh
-        .filter((node) => node.id !== dispatchedId)
+        .filter((node) => node.id !== dispatchedId && !(node.id in backupUnits))
         .map((node) => (
           <Marker
             key={node.id}
@@ -728,6 +790,39 @@ function FlareSequence({
           icon={buildRangerIcon(RANGERS.find((n) => n.id === dispatchedId)?.name ?? "")}
         />
       )}
+
+      {Object.entries(backupUnits).flatMap(([id, unit]) => {
+        const node = RANGERS.find((r) => r.id === id);
+        if (!node) return [];
+        const layers = [];
+        // Only the focused unit's route is drawn — with several units
+        // moving at once, drawing every route at the same time would be a
+        // tangle of waypoints. Click a unit to focus it (shows its route,
+        // flies the camera in); click it again to un-focus.
+        if (focusedId === id && unit.route.length > 1) {
+          layers.push(
+            <Polyline
+              key={`${id}-route`}
+              positions={unit.route}
+              pathOptions={{ color: "#fabd00", weight: 2, opacity: 0.6, dashArray: "4 6" }}
+            />,
+          );
+        }
+        layers.push(
+          <Marker
+            key={`${id}-marker`}
+            position={unit.pos}
+            icon={buildRangerIcon(node.name)}
+            eventHandlers={{
+              click: () => {
+                setFocusedId((prev) => (prev === id ? null : id));
+                map.flyTo(unit.pos, 17, { duration: 1 });
+              },
+            }}
+          />,
+        );
+        return layers;
+      })}
 
       {victim && <Marker position={victim} icon={VICTIM_ICON} />}
     </>

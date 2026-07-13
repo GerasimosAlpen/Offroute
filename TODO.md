@@ -251,6 +251,31 @@ Still simulated: no real task/assignment backend (see Backend section) —
 persisted or broadcast. Real version needs the backend task model + WS
 broadcast described above.
 
+## All-available-units search assist + focus/un-focus — built
+
+Previously only the single nearest ranger actually moved during a FLARE
+drill; everyone else just radioed in "fine, continuing patrol" from wherever
+they already were. Now every ranger who's free (checked against
+`useTasksStore`'s live `tasks`, same `status === "enroute"` busy-check as
+`assign()` uses) gets sent toward the epicenter too, to help search for more
+victims — each scattered to a slightly different point around it (not
+stacked on the exact same spot) via a small per-unit offset, gliding there
+with the same `fetchRoadRoute`/`animateAlongRoute` engine as everything else.
+Dispatch happens in the background (`void Promise.all(...)`, not awaited) so
+the main drill sequence doesn't stall waiting for every backup unit to
+arrive — their own arrival logs land in Comm Center independently, even
+after the alert has already gone calm.
+
+**Focus/un-focus, so it doesn't turn into a tangle of waypoints:** with
+several units moving simultaneously, drawing every one's route line at once
+would be unreadable. So backup units only ever show as a marker by default —
+clicking one sets it as the sequence's single `focusedId`, which reveals
+*its* route and flies the camera in; clicking the same unit again clears the
+focus (hides the route, no camera move). Only one route shown at a time,
+picked by the operator — this is the "which one can we choose to show"
+behavior. The primary dispatched unit's route is unaffected by this and
+still always shows during its own travel, same as before.
+
 ### Three real bugs found and fixed here — same mistakes to avoid in the real backend
 
 Genuine logic bugs (the first two in `src/store/tasks.ts`, the third
