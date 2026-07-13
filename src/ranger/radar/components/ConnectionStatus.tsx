@@ -1,15 +1,19 @@
+import { useState } from "preact/hooks";
 import { Wifi, WifiOff } from "lucide-preact";
 import { motion, AnimatePresence } from "framer-motion";
 import { useOnlineStatus } from "@/lib/useOnlineStatus";
+import { SidebarTooltip } from "./SidebarTooltip";
 
 export function ConnectionStatus({ collapsed }: { collapsed: boolean }) {
   const online = useOnlineStatus();
+  const [hovered, setHovered] = useState(false);
   const Icon = online ? Wifi : WifiOff;
 
   return (
     <div
-      title={online ? "Online" : "Offline"}
-      className={`flex items-center gap-3 w-full py-4 font-mono font-medium text-sm tracking-[0.7px] whitespace-nowrap select-none ${
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`relative flex items-center gap-3 w-full py-4 font-mono font-medium text-sm tracking-[0.7px] whitespace-nowrap select-none ${
         online ? "text-[#e1bec2]" : "text-[#ff8fa3]"
       } ${collapsed ? "justify-center px-0" : "pl-7 pr-6"}`}
     >
@@ -41,6 +45,11 @@ export function ConnectionStatus({ collapsed }: { collapsed: boolean }) {
           </motion.span>
         )}
       </AnimatePresence>
+
+      <SidebarTooltip
+        show={collapsed && hovered}
+        label={online ? "Online" : "Offline"}
+      />
     </div>
   );
 }

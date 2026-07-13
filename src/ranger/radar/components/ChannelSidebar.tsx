@@ -2,9 +2,11 @@ import { useRef, useState } from "preact/hooks";
 import { motion, AnimatePresence } from "framer-motion";
 import { Radar } from "lucide-preact";
 import { NavigationTabs, FooterTabs } from "./NavigationTabs";
+import { SidebarTooltip } from "./SidebarTooltip";
+import { useDeviceLocation } from "@/store/location";
 
-const MIN_WIDTH = 224;
-const MAX_WIDTH = 420;
+const MIN_WIDTH = 124;
+const MAX_WIDTH = 340;
 const DEFAULT_WIDTH = 288;
 const COLLAPSED_WIDTH = 72;
 const COLLAPSE_THRESHOLD = 160;
@@ -22,8 +24,10 @@ export function ChannelSidebar() {
     () => localStorage.getItem(COLLAPSED_KEY) === "1",
   );
   const [isDragging, setIsDragging] = useState(false);
+  const [markHovered, setMarkHovered] = useState(false);
   const draggingRef = useRef(false);
   const liveWidthRef = useRef(width);
+  const location = useDeviceLocation();
 
   const setCollapsedPersisted = (next: boolean) => {
     setCollapsed(next);
@@ -34,6 +38,7 @@ export function ChannelSidebar() {
     draggingRef.current = true;
     setIsDragging(true);
     liveWidthRef.current = collapsed ? COLLAPSED_WIDTH : width;
+    document.body.style.userSelect = "none";
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   };
 
@@ -58,6 +63,7 @@ export function ChannelSidebar() {
     if (!draggingRef.current) return;
     draggingRef.current = false;
     setIsDragging(false);
+    document.body.style.userSelect = "";
 
     if (collapsed) return;
 
@@ -66,7 +72,10 @@ export function ChannelSidebar() {
       return;
     }
 
-    const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, liveWidthRef.current));
+    const clamped = Math.min(
+      MAX_WIDTH,
+      Math.max(MIN_WIDTH, liveWidthRef.current),
+    );
     setWidth(clamped);
     localStorage.setItem(WIDTH_KEY, String(clamped));
   };
@@ -81,7 +90,12 @@ export function ChannelSidebar() {
       animate={{ x: 0, opacity: 1, width: asideWidth }}
       transition={
         isDragging
-          ? { type: "spring", stiffness: 260, damping: 28, width: { duration: 0 } }
+          ? {
+              type: "spring",
+              stiffness: 260,
+              damping: 28,
+              width: { duration: 0 },
+            }
           : { type: "spring", stiffness: 260, damping: 28 }
       }
       className="relative h-full flex flex-col shrink-0 bg-[#262626] border-r-2 border-[#444] items-start justify-between font-grotesk select-none overflow-hidden"
@@ -95,14 +109,17 @@ export function ChannelSidebar() {
               key="mark"
               type="button"
               onClick={() => setCollapsedPersisted(false)}
+              onMouseEnter={() => setMarkHovered(true)}
+              onMouseLeave={() => setMarkHovered(false)}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="flex items-center justify-center w-full text-[#FF0040]"
+              className="relative flex items-center justify-center w-full text-[#FF0040]"
               aria-label="Expand sidebar"
             >
               <Radar size={26} strokeWidth={2.2} />
+              <SidebarTooltip show={markHovered} label="Expand sidebar" />
             </motion.button>
           ) : (
             <motion.div
@@ -116,9 +133,14 @@ export function ChannelSidebar() {
                 RANGER COMMAND
               </h1>
 
-              {/* TODO: change into the ranger actual location */}
-              <p className="font-mono font-thin text-[14px] tracking-[1.4px] text-[#E1BEC2]">
-                sector-07
+              <p
+                className={`font-mono font-thin text-[14px] tracking-[1.4px] uppercase ${
+                  location.status === "ready" || location.status === "cached"
+                    ? "text-[#E1BEC2]"
+                    : "text-[#8a8a8a]"
+                }`}
+              >
+                {location.label}
               </p>
             </motion.div>
           )}
@@ -132,6 +154,7 @@ export function ChannelSidebar() {
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
         onPointerUp={onHandlePointerUp}
+        onPointerCancel={onHandlePointerUp}
         onDblClick={onHandleDoubleClick}
         className="absolute top-0 -right-1 h-full w-2 cursor-col-resize touch-none z-10 group"
       >
