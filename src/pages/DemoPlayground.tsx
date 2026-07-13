@@ -50,6 +50,18 @@ export default function DemoPlayground() {
             >
               Ranger → radar console
             </Link>
+            <Link
+              href="/ranger/personel"
+              class="text-xs font-medium text-emerald-400 hover:text-emerald-300"
+            >
+              Personel → mobile app
+            </Link>
+            <Link
+              href="/user"
+              class="text-xs font-medium text-sky-400 hover:text-sky-300"
+            >
+              User → warga app
+            </Link>
             <div class="hidden sm:flex gap-1.5 flex-wrap justify-end max-w-sm">
               {stack.map((s) => (
                 <span key={s} class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800/80 text-zinc-500 border border-zinc-700/50">
