@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { getPersisted, setPersisted } from "@/lib/persist";
 
 export type GeoStatus =
   | "cached"
@@ -8,32 +9,26 @@ export type GeoStatus =
   | "denied"
   | "unavailable";
 
+interface Coords {
+  lat: number;
+  lon: number;
+}
+
 interface LocationState {
   status: GeoStatus;
   /** Human-readable place name once resolved, a status message otherwise. */
   label: string;
+  /** Raw coordinates, once a fix has actually landed — for anything that needs to plot a point (the tactical map), not just display text. */
+  coords: Coords | null;
+}
+
+interface CachedLocation {
+  label: string;
+  lat: number;
+  lon: number;
 }
 
 const STORAGE_KEY = "ranger:last-location";
-
-function readCachedLabel(): string | null {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return typeof parsed?.label === "string" ? parsed.label : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedLabel(label: string) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ label }));
-  } catch {
-    // storage unavailable/full — cache is a nice-to-have, not load-bearing
-  }
-}
 
 function formatCoords(lat: number, lon: number) {
   const latHemi = lat >= 0 ? "N" : "S";
@@ -66,66 +61,79 @@ async function reverseGeocode(
   return typeof place === "string" ? place : null;
 }
 
-const cachedLabel = readCachedLabel();
-
 /**
  * Live device location, shared app-wide. GPS is requested once (module-level
  * guard below) no matter how many components read this store, and every
  * reader sees the same watch instead of each mounting its own — this is
  * meant to run for the whole app session, not per-component.
- *
- * Starts from the last resolved location (localStorage) instead of a blank
- * "locating" state when one's available, so the UI paints instantly on
- * every launch instead of waiting on a fresh GPS fix + geocode round trip.
- * The real watch still kicks off underneath and corrects it once it lands.
  */
-export const useLocationStore = create<LocationState>(() =>
-  cachedLabel
-    ? { status: "cached", label: cachedLabel }
-    : { status: "locating", label: "Acquiring GPS lock..." },
-);
+export const useLocationStore = create<LocationState>(() => ({
+  status: "locating",
+  label: "Acquiring GPS lock...",
+  coords: null,
+}));
 
 let started = false;
 let lastCoordsKey: string | null = null;
+let geocodeAbort: AbortController | null = null;
+
+function handleFix(lat: number, lon: number) {
+  const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  if (key === lastCoordsKey) return;
+  lastCoordsKey = key;
+
+  useLocationStore.setState({
+    status: "resolving",
+    label: formatCoords(lat, lon),
+    coords: { lat, lon },
+  });
+
+  geocodeAbort?.abort();
+  geocodeAbort = new AbortController();
+
+  reverseGeocode(lat, lon, geocodeAbort.signal)
+    .then((place) => {
+      const label = place ? place.toUpperCase() : formatCoords(lat, lon);
+      useLocationStore.setState({ status: "ready", label, coords: { lat, lon } });
+      void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
+    })
+    .catch(() => {
+      const label = formatCoords(lat, lon);
+      useLocationStore.setState({ status: "ready", label, coords: { lat, lon } });
+      void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
+    });
+}
+
+/**
+ * Loads the last resolved location from disk (Tauri store, or localStorage
+ * outside Tauri) so the UI paints something real instead of "Acquiring GPS
+ * lock..." on every launch. Guarded so it can't clobber a fresher live fix
+ * that resolved first.
+ */
+async function loadCachedLabel() {
+  const cached = await getPersisted<CachedLocation>(STORAGE_KEY);
+  if (cached && useLocationStore.getState().status === "locating") {
+    useLocationStore.setState({
+      status: "cached",
+      label: cached.label,
+      coords: { lat: cached.lat, lon: cached.lon },
+    });
+  }
+}
 
 function startWatching() {
   if (started) return;
   started = true;
+
+  void loadCachedLabel();
 
   if (!navigator.geolocation) {
     useLocationStore.setState({ status: "unavailable", label: "LOCATION UNKNOWN" });
     return;
   }
 
-  let abort: AbortController | null = null;
-
   navigator.geolocation.watchPosition(
-    (position) => {
-      const { latitude: lat, longitude: lon } = position.coords;
-      const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
-      if (key === lastCoordsKey) return;
-      lastCoordsKey = key;
-
-      useLocationStore.setState({
-        status: "resolving",
-        label: formatCoords(lat, lon),
-      });
-
-      abort?.abort();
-      abort = new AbortController();
-
-      reverseGeocode(lat, lon, abort.signal)
-        .then((place) => {
-          const label = place ? place.toUpperCase() : formatCoords(lat, lon);
-          useLocationStore.setState({ status: "ready", label });
-          writeCachedLabel(label);
-        })
-        .catch(() => {
-          const label = formatCoords(lat, lon);
-          useLocationStore.setState({ status: "ready", label });
-          writeCachedLabel(label);
-        });
-    },
+    (position) => handleFix(position.coords.latitude, position.coords.longitude),
     (error) => {
       useLocationStore.setState(
         error.code === error.PERMISSION_DENIED

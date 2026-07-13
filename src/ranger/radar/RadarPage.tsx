@@ -4,6 +4,7 @@ import { Switch, Route } from "wouter";
 import { DesktopOnlyGate } from "../DesktopOnlyGate";
 import { BootSequence } from "../BootSequence";
 import { ChannelSidebar } from "./components/ChannelSidebar";
+import { EmergencyNotice } from "./components/EmergencyNotice";
 import { TacticalMap } from "./pages/TacticalMap";
 import { SquadLogs } from "./pages/SquadLogs";
 import { LaporIncident } from "./pages/LaporIncident";
@@ -26,6 +27,7 @@ export default function RadarPage() {
             <Route component={TacticalMap} />
           </Switch>
         </div>
+        <EmergencyNotice />
       </BootSequence>
     </DesktopOnlyGate>
   );

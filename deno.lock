@@ -13,6 +13,7 @@
     "npm:@tauri-apps/plugin-opener@2": "2.5.4",
     "npm:@tauri-apps/plugin-os@^2.3.2": "2.3.2",
     "npm:@tauri-apps/plugin-sql@^2.4.0": "2.4.0",
+    "npm:@tauri-apps/plugin-store@^2.4.3": "2.4.3",
     "npm:@tauri-apps/plugin-stronghold@^2.3.1": "2.3.1",
     "npm:@types/leaflet@^1.9.21": "1.9.21",
     "npm:@types/node@^25.9.1": "25.9.1",
@@ -1598,6 +1599,12 @@
     },
     "@tauri-apps/plugin-sql@2.4.0": {
       "integrity": "sha512-SIICc5JlnK6OrBZzOw7MmhXHPlmASpt5zLWIu10WW4kLr5cDYOXHdV2MoCgYQkgZLQfyBYgF3SQa5XCisUiQkw==",
+      "dependencies": [
+        "@tauri-apps/api"
+      ]
+    },
+    "@tauri-apps/plugin-store@2.4.3": {
+      "integrity": "sha512-9LWPj9yMphRi9czEtUv87XHbl1b6xgd9EXpPrUnq6nG7+nbtoF84d4Kwz9xhAv/Hf30sr58pq7EOlyI936y8qw==",
       "dependencies": [
         "@tauri-apps/api"
       ]
@@ -3747,6 +3754,7 @@
         "npm:@tauri-apps/plugin-opener@2",
         "npm:@tauri-apps/plugin-os@^2.3.2",
         "npm:@tauri-apps/plugin-sql@^2.4.0",
+        "npm:@tauri-apps/plugin-store@^2.4.3",
         "npm:@tauri-apps/plugin-stronghold@^2.3.1",
         "npm:@types/leaflet@^1.9.21",
         "npm:@types/node@^25.9.1",

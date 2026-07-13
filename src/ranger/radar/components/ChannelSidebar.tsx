@@ -1,9 +1,11 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { motion, AnimatePresence } from "framer-motion";
 import { Radar } from "lucide-preact";
 import { NavigationTabs, FooterTabs } from "./NavigationTabs";
 import { SidebarTooltip } from "./SidebarTooltip";
+import { FlareButton } from "./FlareButton";
 import { useDeviceLocation } from "@/store/location";
+import { getPersisted, setPersisted } from "@/lib/persist";
 
 const MIN_WIDTH = 124;
 const MAX_WIDTH = 340;
@@ -13,25 +15,32 @@ const COLLAPSE_THRESHOLD = 160;
 const WIDTH_KEY = "ranger:sidebar-width";
 const COLLAPSED_KEY = "ranger:sidebar-collapsed";
 
-function readStoredWidth() {
-  const saved = Number(localStorage.getItem(WIDTH_KEY));
-  return saved >= MIN_WIDTH && saved <= MAX_WIDTH ? saved : DEFAULT_WIDTH;
-}
-
 export function ChannelSidebar() {
-  const [width, setWidth] = useState(readStoredWidth);
-  const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem(COLLAPSED_KEY) === "1",
-  );
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [collapsed, setCollapsed] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [markHovered, setMarkHovered] = useState(false);
   const draggingRef = useRef(false);
   const liveWidthRef = useRef(width);
   const location = useDeviceLocation();
 
+  // Persisted values load async (real disk I/O in Tauri) — start from the
+  // defaults above and correct once loaded, instead of blocking first paint.
+  useEffect(() => {
+    getPersisted<number>(WIDTH_KEY).then((saved) => {
+      if (saved !== null && saved >= MIN_WIDTH && saved <= MAX_WIDTH) {
+        setWidth(saved);
+        liveWidthRef.current = saved;
+      }
+    });
+    getPersisted<boolean>(COLLAPSED_KEY).then((saved) => {
+      if (saved !== null) setCollapsed(saved);
+    });
+  }, []);
+
   const setCollapsedPersisted = (next: boolean) => {
     setCollapsed(next);
-    localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+    void setPersisted(COLLAPSED_KEY, next);
   };
 
   const onHandlePointerDown = (e: PointerEvent) => {
@@ -77,7 +86,7 @@ export function ChannelSidebar() {
       Math.max(MIN_WIDTH, liveWidthRef.current),
     );
     setWidth(clamped);
-    localStorage.setItem(WIDTH_KEY, String(clamped));
+    void setPersisted(WIDTH_KEY, clamped);
   };
 
   const onHandleDoubleClick = () => setCollapsedPersisted(!collapsed);
@@ -148,6 +157,7 @@ export function ChannelSidebar() {
       </header>
 
       <NavigationTabs collapsed={collapsed} />
+      <FlareButton collapsed={collapsed} />
       <FooterTabs collapsed={collapsed} />
 
       <div

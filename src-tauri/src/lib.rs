@@ -30,7 +30,13 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
-        .invoke_handler(tauri::generate_handler![greet, commands::device::emit_test_event])
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::device::emit_test_event,
+            commands::system_status::get_battery_status,
+            commands::system_status::get_network_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

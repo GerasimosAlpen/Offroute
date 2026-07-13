@@ -8,6 +8,8 @@ import {
 } from "lucide-preact";
 import { NavItem } from "./NavItem";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { BatteryIndicator } from "./BatteryIndicator";
+import { BmkgIndicator } from "./BmkgIndicator";
 
 const NAV_ITEMS = [
   { href: "/ranger/radar/map", label: "Tactical Map", icon: Map },
@@ -46,6 +48,8 @@ export function FooterTabs({ collapsed }: { collapsed: boolean }) {
         ))}
       </ul>
       <ConnectionStatus collapsed={collapsed} />
+      <BatteryIndicator collapsed={collapsed} />
+      <BmkgIndicator collapsed={collapsed} />
     </div>
   );
 }
