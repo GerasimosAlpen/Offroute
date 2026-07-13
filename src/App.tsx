@@ -17,6 +17,12 @@ import axios from "axios";
 import * as v from "valibot";
 import { Effect } from "effect";
 import { motion } from "framer-motion";
+import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
 import {
   Zap,
   Bell,
@@ -28,11 +34,20 @@ import {
   Sparkles,
   Wind,
   Palette,
+  MapPin,
   CheckCircle2,
   XCircle,
   Loader2,
 } from "lucide-preact";
 import { useDemoStore } from "./store/demo";
+
+// leaflet's default marker icons reference paths that break under bundlers
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: markerIcon2x,
+  iconUrl: markerIcon,
+  shadowUrl: markerShadow,
+});
 
 // ── shared primitives ─────────────────────────────────────────────────────────
 
@@ -604,6 +619,40 @@ function FramerCard() {
   );
 }
 
+// ── React Leaflet ─────────────────────────────────────────────────────────────
+
+function MapCard() {
+  const jakarta: [number, number] = [-6.1754, 106.8272];
+
+  return (
+    <Card
+      icon={<MapPin size={14} />}
+      title="React Leaflet"
+      badge="map"
+      badgeColor="text-green-400 border-green-500/30 bg-green-500/10"
+      delay={0.55}
+    >
+      <p class="text-xs text-zinc-500">Interactive Leaflet maps via preact/compat.</p>
+      <div class="h-40 w-full rounded-lg overflow-hidden z-0">
+        <MapContainer
+          center={jakarta}
+          zoom={12}
+          scrollWheelZoom={false}
+          style={{ height: "100%", width: "100%" }}
+        >
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          <Marker position={jakarta}>
+            <Popup>Offroute HQ</Popup>
+          </Marker>
+        </MapContainer>
+      </div>
+    </Card>
+  );
+}
+
 // ── Tailwind v4 ───────────────────────────────────────────────────────────────
 
 function TailwindCard() {
@@ -670,7 +719,7 @@ const stack = [
   "Tauri v2", "Preact", "TypeScript", "Vite 6",
   "Tailwind v4", "Zustand v5", "TanStack Query",
   "Axios", "Valibot", "Effect-TS", "Framer Motion",
-  "Lucide", "SQLite", "Stronghold", "NestJS",
+  "Lucide", "SQLite", "Stronghold", "NestJS", "React Leaflet",
 ];
 
 export default function App() {
@@ -719,6 +768,7 @@ export default function App() {
           <FramerCard />
           <TailwindCard />
           <LucideCard />
+          <MapCard />
         </div>
       </main>
     </div>
