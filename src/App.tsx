@@ -7,6 +7,9 @@ import PersonelPage from "@/ranger/personel/PersonelPage";
 import UserPage from "@/user/UserPage";
 import { loadFlareState } from "@/store/flare";
 import { useMessagePinsStore } from "@/store/messagePins";
+import { useTasksStore } from "@/store/tasks";
+import { useEvacuationPointsStore } from "@/store/evacuationPoints";
+import { useEvacuationRequestsStore } from "@/store/evacuationRequests";
 
 /**
  * App-level initializer — fires once on mount to sync backend state into
@@ -18,6 +21,11 @@ function AppInit() {
     void loadFlareState();
     // Load persisted message pins from backend
     void useMessagePinsStore.getState().loadPins();
+    // Resume in-progress/resolved tasks from backend
+    void useTasksStore.getState().loadTasks();
+    // Resume confirmed evacuation points and pending requests from backend
+    void useEvacuationPointsStore.getState().loadPoints();
+    void useEvacuationRequestsStore.getState().loadPending();
   }, []);
 
   return null;

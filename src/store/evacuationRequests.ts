@@ -55,6 +55,7 @@ interface EvacuationRequestsState {
 export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, get) => {
   // Real-time: another client's evacuation ping shows up here too, awaiting the same accept/reject
   socket.on("evac-request", (req: ApiEvacuationRequest) => {
+    if (!req || typeof req.id !== "string") return; // malformed payload, ignore rather than throw
     if (req.accepted !== null) return;
     const exists = get().pending.some((p) => p.id === req.id);
     if (!exists) set((s) => ({ pending: [...s.pending, apiRequestToLocal(req)] }));

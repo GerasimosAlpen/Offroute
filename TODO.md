@@ -1,20 +1,30 @@
 # TODO
 
-Split three ways: **Backend** (NestJS server in `_server/` — none of it exists
-yet, per `CLAUDE.md`), **Backend (Tauri)** (native Rust/Tauri-side work), and
-**Frontend** (Preact UI, mostly already built as honest simulations pending
-the backend work below).
+Split three ways: **Backend** (NestJS server in `_server/`), **Backend
+(Tauri)** (native Rust/Tauri-side work), and **Frontend** (Preact UI).
+
+**Correction, 2026-07-14: the "Backend: none of it exists yet" framing below
+was true when first written but is now stale — a real NestJS + Prisma +
+Postgres (Supabase-hosted) backend exists, with REST endpoints, a Socket.IO
+gateway, and a seed script, built by a collaborator (`GerasimosAlpen`,
+PRs #8/#9). `CLAUDE.md`'s "Prisma schema currently empty" claim is similarly
+outdated. See "Radar ↔ backend wiring pass" further down for the current,
+verified state of what's actually connected vs. still simulated — that
+section is the accurate one; treat the rest of this "Backend (NestJS)"
+section as historical context for *why* things are shaped the way they are,
+not as a statement of current reality.
 
 ---
 
 # Backend (NestJS)
 
-## Realtime personel tracking & tasking (not started)
+## Realtime personel tracking & tasking — now built, see wiring pass below
 
-Needed for: "ranger Budi takes a task (e.g. check on the crash) → track him
-in realtime" and the message-pin feature below. None of this exists — there's
-no task/assignment concept in the data model at all yet, only the FLARE
-drill's own internal, throwaway "nearest mesh node" pick.
+The task/assignment model, WS gateway, and REST endpoints described in this
+subsection (as of 2026-07-14) all exist: `_server/src/tasks`, `_server/src/
+gateway/events.gateway.ts`, `_server/prisma/schema.prisma`'s `Task` model.
+Kept below for the original reasoning; skip to "Radar ↔ backend wiring pass"
+for what's actually wired up on the frontend today.
 
 - **Task/assignment model** — a personel can *take* a task (an incident, a
   minor hazard, a FLARE dispatch) which should be a real assignment record,
@@ -38,6 +48,101 @@ drill's own internal, throwaway "nearest mesh node" pick.
 - **FLARE broadcast persistence** — right now "Mode Flare" only sets local
   Zustand state (`src/store/flare.ts`); a real major-incident declaration
   should hit the backend so it's not just a client-side toggle.
+
+## Radar ↔ backend wiring pass (2026-07-14) — audited + completed what was frontend-only
+
+Audited every backend controller/service/gateway event against every
+frontend call site to answer "is radar actually realtime, or is the backend
+just sitting there unused?" Answer: **hybrid** — some channels were fully
+live, several had the backend half built with nothing calling it, one had
+the frontend half built with no backend route to hit. Fixed everything that
+was fixable from the frontend side alone (no `_server` changes — that's
+listed separately below for the collaborator to pick up):
+
+**Already fully wired before this pass (left alone):** FLARE alerts
+(`POST /flare/activate` ↔ `flare-broadcast`), message pins (`POST /messages/
+pin` ↔ `message-pin`), personnel roster, incidents list (REST, polled),
+task assign/arrive (`POST /tasks/assign`, `PATCH /tasks/:id/status`),
+evacuation request/accept/reject (REST only, no realtime fan-out — until
+now).
+
+**Added in this pass, all in `src/`, no backend changes:**
+- `src/store/tasks.ts` — `loadTasks()` hydrates in-progress/resolved tasks
+  from `GET /tasks` on app start (previously never called — a page reload
+  forgot every task that wasn't this tab's own). The live glide now also
+  streams position to `POST /tasks/:id/position` every ~400ms during transit
+  (throttled — was never called at all before, so that endpoint and its
+  `ranger-position` broadcast were dead code). Subscribed to `task-update`
+  and `ranger-position` so a second radar client sees another client's
+  dispatches and positions move, not just its own — guarded by a
+  `locallyDrivenHazards`/`locallyDrivenRangers` set so a client doesn't treat
+  the echo of its *own* broadcast as a remote update and fight its own
+  smooth local animation.
+- `src/store/evacuationPoints.ts` — `loadPoints()` hydrates confirmed points
+  from `GET /evacuation/points` on start (previously never called — a
+  confirmed point vanished on reload, only ever reflecting what *this* tab
+  itself had just accepted). Subscribed to `evac-confirmed` for cross-client
+  sync.
+- `src/store/evacuationRequests.ts` — `loadPending()` hydrates pending
+  requests from `GET /evacuation/pending`. Subscribed to `evac-request` so
+  another client's incoming ping shows up here too, not just ones this tab
+  itself triggered.
+- `src/hooks/useIncidents.ts` — subscribed to `incident-new` (module-level,
+  registered once) to invalidate the TanStack Query cache instantly instead
+  of waiting on the existing 30s poll.
+- `src/App.tsx`'s `AppInit` now calls all of the above `load*()` functions
+  alongside the existing `loadFlareState()`/`loadPins()` calls.
+- **Hardening pass**: every socket listener (the ones just added, and the
+  three pre-existing ones in `commsLog.ts`/`messagePins.ts`/`flare.ts`) now
+  guards against a null/malformed payload before touching its fields, so a
+  bad broadcast logs a warning instead of throwing inside the listener.
+
+**Backend gaps found — need the collaborator, not fixable from the frontend
+alone:**
+- **No `POST /comms` route.** `_server/src/comms/comms.service.ts` has a
+  fully-working `append()` method (persists a `CommsEntry`, emits
+  `comms-message`) but `comms.controller.ts` only exposes `GET /comms/
+  history` — nothing ever calls `append()`. Result: the frontend's
+  `comms-message` listener (`src/store/commsLog.ts`) is live code waiting on
+  an event that can never fire. Every comms-log line the radar UI shows
+  today (task acceptance, arrival, evac request/accept/reject) is generated
+  by `useCommsLogStore.getState().append()` and stays purely local to that
+  browser tab — it never reaches the backend or other clients. Needs a
+  `POST /comms` (or similar) route wired to the existing `append()` before
+  this can be made real.
+- **`LaporIncident.tsx` (radar's incident-report page) is still a pure UI
+  mock** — hardcoded history list, no state wired up, and its "KIRIM
+  LAPORAN" submit button has no handler at all. Beyond just adding a submit
+  handler: this page's own `IncidentType` (`fire | flood | quake | landslide
+  | other`) doesn't match the backend's `HazardKind` enum (`fire | blocked |
+  medical | crash | theft`) — same app, two disconnected incident
+  taxonomies, one of them (`HazardKind`, in `src/lib/hazards.ts`) already
+  used everywhere else and matching the backend exactly. This needs a
+  product decision (which taxonomy wins, or do both need to coexist) before
+  it's wired, not just a mechanical `incidentsApi.create()` call.
+- **`EventsGateway` is provided per-module** (separately in `comms`,
+  `evacuation`, `flare`, `incidents`, `messages`, `tasks` — six providers of
+  the same class, no shared `GatewayModule` exporting one instance).
+  Probably harmless for `.emit()` broadcasting today, but not how Nest
+  gateways are meant to be shared, and `handleConnection`/`handleDisconnect`
+  fire once per module per client. Worth a cleanup pass.
+- **Uncommitted local diff in `_server/prisma/schema.prisma`** plus an
+  untracked `_server/bun.lock` were sitting in the working tree when this
+  audit ran — worth reconciling/committing (or discarding, if stray) before
+  either of you relies on `main` matching what's actually running.
+
+**Known limitation, not fixed in this pass:** `src/store/tasks.ts`'s
+`assign()` still looks up hazards/rangers from the static `HAZARDS`/`RANGERS`
+constants (`src/lib/hazards.ts`, `src/lib/rangers.ts`), not from the live
+`useIncidents()`/`usePersonnel()` query data the UI actually renders. This
+works today only because `_server/prisma/seed.ts` deliberately seeds
+matching ids (`"bravo"`, `"a01"`, etc.) — so it's not visibly broken, but a
+**new** incident (once `POST /incidents` is actually reachable from
+somewhere) wouldn't be dispatchable via "Kirim Unit", since `assign()`'s
+`HAZARDS.find()` would never find it. Fixing this properly means threading
+the live `hazards`/`personnel` query results into `assign()` from its call
+site (`HazardStatusPanel.tsx`) instead of importing the static arrays
+directly inside the store.
 
 ## BMKG weather — needs an adm4 lookup
 

@@ -30,6 +30,7 @@ function formatNow() {
 export const useCommsLogStore = create<CommsLogState>((set, get) => {
   // Subscribe to real-time comms events from backend
   socket.on("comms-message", (entry: CommEntry) => {
+    if (!entry || typeof entry.body !== "string") return; // malformed payload, ignore rather than throw
     // De-dupe: don't re-add entries that came back as echoes of our own POST
     const exists = get().entries.some(
       (e) => e.time === entry.time && e.sender === entry.sender && e.body === entry.body,

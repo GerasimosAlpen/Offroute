@@ -60,6 +60,7 @@ interface EvacuationPointsState {
 export const useEvacuationPointsStore = create<EvacuationPointsState>((set, get) => {
   // Real-time: another client's accepted evacuation request shows up here too
   socket.on("evac-confirmed", (point: ApiEvacuationPoint) => {
+    if (!point || typeof point.id !== "string") return; // malformed payload, ignore rather than throw
     const exists = get().points.some((p) => p.id === point.id);
     if (!exists) set((s) => ({ points: [...s.points, apiPointToLocal(point)] }));
   });

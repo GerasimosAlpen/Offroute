@@ -21,6 +21,7 @@ interface FlareState {
 export const useFlareStore = create<FlareState>((set) => {
   // Real-time: another client (or the backend itself) can broadcast a FLARE
   socket.on("flare-broadcast", (payload: { flareId: string; sequence: number; status: string }) => {
+    if (!payload || typeof payload.sequence !== "number") return; // malformed payload, ignore rather than throw
     if (payload.status === "active") {
       set((s) => ({
         active: true,

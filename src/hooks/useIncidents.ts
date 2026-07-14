@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/preact-query";
 import { incidentsApi, type Incident } from "@/lib/api";
 import { HAZARDS, type HazardData } from "@/lib/hazards";
+import { socket } from "@/lib/socket";
+import { queryClient } from "@/lib/queryClient";
+
+// Registered once at module load (not per hook call, unlike an effect inside
+// a component) — another client reporting an incident invalidates the cache
+// instantly instead of waiting on the 30s poll below to catch up.
+socket.on("incident-new", () => {
+  void queryClient.invalidateQueries({ queryKey: ["incidents"] });
+});
 
 /**
  * Fetches live incidents from the backend.
