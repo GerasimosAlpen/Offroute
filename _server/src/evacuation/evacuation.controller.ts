@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Param, Body } from "@nestjs/common";
+import { Controller, Get, Post, Delete, Param, Body } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiParam, ApiBody, ApiResponse } from "@nestjs/swagger";
 import { EvacuationService } from "./evacuation.service";
 import { CreateEvacRequestDto } from "./dto/evacuation.dto";
@@ -42,5 +42,12 @@ export class EvacuationController {
   @ApiParam({ name: "id", description: "EvacuationRequest ID" })
   reject(@Param("id") id: string) {
     return this.evacuationService.reject(id);
+  }
+
+  @Delete("points/:id")
+  @ApiOperation({ summary: "Radar removes/relocates a confirmed evacuation point. Broadcasts evac-removed WS event." })
+  @ApiParam({ name: "id", description: "EvacuationPoint ID" })
+  removePoint(@Param("id") id: string) {
+    return this.evacuationService.removePoint(id);
   }
 }

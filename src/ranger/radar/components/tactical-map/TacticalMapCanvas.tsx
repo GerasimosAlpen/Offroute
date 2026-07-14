@@ -11,9 +11,9 @@ import { BmkgTicker } from "./BmkgTicker";
 import { SELF_ICON } from "./mapIcons";
 import { FocusableMarkers } from "./FocusableMarkers";
 import { TaskMarkers } from "./TaskMarkers";
-import { MessagePinMarkers } from "./MessagePinMarkers";
 import { EvacuationPointMarkers } from "./EvacuationPointMarkers";
 import { FollowRanger } from "./FollowRanger";
+// MessagePinMarkers removed per user request — radar map no longer shows personel status message pins.
 import { FlareSequence, ACTIVE_DRILL_PHASES, type FlarePhase, type FlareProgress } from "./FlareSequence";
 import { MapControls } from "./MapControls";
 import { OpsHud } from "./OpsHud";
@@ -119,7 +119,6 @@ export function TacticalMapCanvas() {
 
               <FocusableMarkers ranger={coords} phase={phase} />
               <TaskMarkers />
-              <MessagePinMarkers />
               <EvacuationPointMarkers />
 
               <FollowRanger lat={coords.lat} lon={coords.lon} enabled={phase === "idle"} />

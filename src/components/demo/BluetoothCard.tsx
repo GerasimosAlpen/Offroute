@@ -11,7 +11,7 @@ import { primaryBtn, ghostBtn } from "./styles";
  * peripheral mode via NUS), not yet a second Offroute instance.
  */
 export function BluetoothCard() {
-  const { scanning, devices, messages, lastError, startScan, stopScan, connect, sendMessage } = useBluetoothStore();
+  const { scanning, devices, messages, lastError, deviceErrors, startScan, stopScan, connect, sendMessage } = useBluetoothStore();
 
   return (
     <Card
@@ -36,15 +36,20 @@ export function BluetoothCard() {
       {devices.length > 0 && (
         <ul class="flex flex-col gap-1.5">
           {devices.map((d) => (
-            <li key={d.id} class="flex items-center justify-between gap-2 text-xs font-mono bg-zinc-800 rounded-lg px-3 py-1.5">
-              <span class="truncate text-zinc-300">{d.name ?? d.id}</span>
-              <span class="text-zinc-500 shrink-0">{d.rssi != null ? `${d.rssi} dBm` : "—"}</span>
-              <button
-                class="text-sky-400 hover:text-sky-300 shrink-0"
-                onClick={() => void (d.connected ? sendMessage(d.id, "ping from Offroute") : connect(d.id))}
-              >
-                {d.connected ? "Ping" : "Connect"}
-              </button>
+            <li key={d.id} class="flex flex-col gap-1 bg-zinc-800 rounded-lg px-3 py-1.5">
+              <div class="flex items-center justify-between gap-2 text-xs font-mono">
+                <span class="truncate text-zinc-300">{d.name ?? d.id}</span>
+                <span class="text-zinc-500 shrink-0">{d.rssi != null ? `${d.rssi} dBm` : "—"}</span>
+                <button
+                  class="text-sky-400 hover:text-sky-300 shrink-0"
+                  onClick={() => void (d.connected ? sendMessage(d.id, "ping from Offroute") : connect(d.id))}
+                >
+                  {d.connected ? "Ping" : "Connect"}
+                </button>
+              </div>
+              {deviceErrors[d.id] && (
+                <p class="text-[11px] text-rose-400">{deviceErrors[d.id]}</p>
+              )}
             </li>
           ))}
         </ul>

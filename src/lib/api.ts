@@ -36,11 +36,12 @@ export const flareApi = {
 };
 
 export const evacuationApi = {
-  points:  () => api.get("/evacuation/points").then((r) => r.data),
-  pending: () => api.get("/evacuation/pending").then((r) => r.data),
-  request: (dto: CreateEvacRequestDto) => api.post("/evacuation/request", dto).then((r) => r.data),
-  accept:  (id: string) => api.post(`/evacuation/accept/${id}`).then((r) => r.data),
-  reject:  (id: string) => api.post(`/evacuation/reject/${id}`).then((r) => r.data),
+  points:      () => api.get("/evacuation/points").then((r) => r.data),
+  pending:     () => api.get("/evacuation/pending").then((r) => r.data),
+  request:     (dto: CreateEvacRequestDto) => api.post("/evacuation/request", dto).then((r) => r.data),
+  accept:      (id: string) => api.post(`/evacuation/accept/${id}`).then((r) => r.data),
+  reject:      (id: string) => api.post(`/evacuation/reject/${id}`).then((r) => r.data),
+  removePoint: (id: string) => api.delete(`/evacuation/points/${id}`).then((r) => r.data),
 };
 
 export const messagesApi = {

@@ -4,12 +4,18 @@ import { HAZARDS, type HazardData } from "@/lib/hazards";
 import { socket } from "@/lib/socket";
 import { queryClient } from "@/lib/queryClient";
 import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
+import { raiseAlert } from "@/lib/alerts";
 
 // Registered once at module load (not per hook call, unlike an effect inside
 // a component) — another client reporting an incident invalidates the cache
 // instantly instead of waiting on the 30s poll below to catch up.
-socket.on("incident-new", () => {
+socket.on("incident-new", (incident: Incident) => {
   void queryClient.invalidateQueries({ queryKey: ["incidents"] });
+  // A critical incident needs the operator's attention even if they're on a
+  // different page/window entirely — a passive list entry isn't enough.
+  if (incident?.severity === "critical") {
+    raiseAlert("Insiden kritis baru", incident.label ?? "Insiden baru dilaporkan.");
+  }
 });
 
 /**

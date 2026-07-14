@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { useDeviceLocation } from "@/store/location";
 import { useDeviceHeading, startHeadingWatch } from "@/store/heading";
+import { routeLengthMeters } from "@/lib/routing";
 import "@/lib/leaflet-setup";
 
 import { SELF_ICON, START_ICON } from "../components/peta-taktis/mapIcons";
@@ -13,15 +14,28 @@ import { MapControls } from "../components/peta-taktis/MapControls";
 import { IntroSequence } from "../components/peta-taktis/IntroSequence";
 import { LiveFollow } from "../components/peta-taktis/LiveFollow";
 import { RouteSearchSequence, type SearchParams } from "../components/peta-taktis/RouteSearchSequence";
-import { RouteSheet } from "../components/peta-taktis/RouteSheet";
 import { EventPopup } from "../components/peta-taktis/EventPopup";
-import type { EventMarker, RouteOption } from "../components/peta-taktis/types";
+import type { EventMarker } from "../components/peta-taktis/types";
+
+// Single accent for the active-navigation state — there's only one route now
+// (no more Tercepat/Lebih Aman/Paling Aman choice), so there's nothing left
+// to color-differentiate between.
+const NAV_COLOR = "#66df75";
+// Rough speed assumption for the final ETA readout — matches the same
+// figure RouteSearchSequence's fake candidates already use, so the number
+// on screen doesn't visibly jump between "searching" and "active" states.
+const ASSUMED_SPEED_KMH = 28;
+
+interface ActiveRouteInfo {
+  distanceKm: number;
+  timeMin: number;
+}
 
 export function PetaTaktis() {
   const { coords, label } = useDeviceLocation();
   const [selectedEvent, setSelectedEvent] = useState<EventMarker | null>(null);
-  const [showRouteSheet, setShowRouteSheet] = useState(false);
-  const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
+  const [navActive, setNavActive] = useState(false);
+  const [activeRouteInfo, setActiveRouteInfo] = useState<ActiveRouteInfo | null>(null);
   const [routeLine, setRouteLine] = useState<[number, number][]>([]);
   // Epic route-search sequence state — see RouteSearchSequence.
   // `runId` is bumped per pick and used as a React `key` so each pick fully
@@ -96,27 +110,23 @@ export function PetaTaktis() {
   const handleSelectEvent = (event: EventMarker) => {
     if (selectedEvent?.id === event.id) {
       setSelectedEvent(null);
-      setShowRouteSheet(false);
     } else {
       setSelectedEvent(event);
-      setShowRouteSheet(false);
-      setActiveRoute(null);
+      setNavActive(false);
+      setActiveRouteInfo(null);
     }
   };
 
+  // One tap, straight to the search cinematic — no more picking between
+  // Tercepat/Lebih Aman/Paling Aman first, just "go."
   const handleNavigate = () => {
+    if (!selectedEvent) return;
     // iOS requires DeviceOrientationEvent.requestPermission() to be called
     // from a real tap — this is the first tap in the navigate flow, so it's
     // the right place. No-ops safely wherever the API doesn't exist at all.
     void startHeadingWatch();
-    setShowRouteSheet(true);
-  };
-
-  const handleSelectRoute = (route: RouteOption) => {
-    if (!selectedEvent) return;
-    setActiveRoute(route);
-    setShowRouteSheet(false);
     setRouteLine([]);
+    setActiveRouteInfo(null);
     setSearchLabel("MEMINDAI AREA PENCARIAN...");
     setSearchParams(null);
     setSearchProgress(0);
@@ -127,7 +137,8 @@ export function PetaTaktis() {
 
   const handleClearRoute = () => {
     setSearching(false);
-    setActiveRoute(null);
+    setNavActive(false);
+    setActiveRouteInfo(null);
     setRouteLine([]);
     setScenarioLog([]);
   };
@@ -227,7 +238,7 @@ export function PetaTaktis() {
               />
             </div>
           </motion.div>
-        ) : activeRoute ? (
+        ) : navActive ? (
           <motion.div
             key="active"
             initial={{ height: 0, opacity: 0 }}
@@ -237,16 +248,18 @@ export function PetaTaktis() {
           >
             <div
               className="px-4 py-2 flex items-center justify-between border-b"
-              style={{ background: `${activeRoute.color}15`, borderColor: activeRoute.color }}
+              style={{ background: `${NAV_COLOR}15`, borderColor: NAV_COLOR }}
             >
               <div className="flex items-center gap-2">
-                <Navigation size={12} style={{ color: activeRoute.color } as any} />
-                <span className="font-mono text-[10px] font-bold" style={{ color: activeRoute.color }}>
-                  NAVIGASI AKTIF · {activeRoute.label.toUpperCase()}
+                <Navigation size={12} style={{ color: NAV_COLOR } as any} />
+                <span className="font-mono text-[10px] font-bold" style={{ color: NAV_COLOR }}>
+                  NAVIGASI AKTIF
                 </span>
-                <span className="font-mono text-[9px] text-[#555]">
-                  {activeRoute.time} · {activeRoute.distance}
-                </span>
+                {activeRouteInfo && (
+                  <span className="font-mono text-[9px] text-[#555]">
+                    {activeRouteInfo.timeMin} mnt · {activeRouteInfo.distanceKm.toFixed(1)} km
+                  </span>
+                )}
               </div>
               <button
                 onClick={handleClearRoute}
@@ -314,7 +327,7 @@ export function PetaTaktis() {
 
               {/* Live position — actually moves with GPS fixes */}
               <Marker position={userPos} icon={SELF_ICON} />
-              <LiveFollow pos={userPos} active={!!activeRoute && !searching} />
+              <LiveFollow pos={userPos} active={navActive && !searching} />
 
               {/* Epic route-search cinematic — every candidate filling in,
                   sweep-compared, winner zoomed into, then swapped for the
@@ -331,7 +344,13 @@ export function PetaTaktis() {
                   }}
                   onScenarioTick={(entry) => setScenarioLog((prev) => [...prev, entry])}
                   onResolved={(route) => {
+                    const distanceKm = routeLengthMeters(route) / 1000;
+                    setActiveRouteInfo({
+                      distanceKm,
+                      timeMin: Math.max(1, Math.round((distanceKm / ASSUMED_SPEED_KMH) * 60)),
+                    });
                     setRouteLine(route);
+                    setNavActive(true);
                     setSearching(false);
                   }}
                 />
@@ -340,10 +359,10 @@ export function PetaTaktis() {
               {/* Active route, road-snapped via OSRM (src/lib/routing.ts), same
                   engine radar uses to dispatch units — with the bezier-curve
                   fallback if OSRM's unreachable */}
-              {activeRoute && !searching && routeLine.length > 1 && (
+              {navActive && !searching && routeLine.length > 1 && (
                 <Polyline
                   positions={routeLine}
-                  pathOptions={{ color: activeRoute.color, weight: 4, opacity: 0.85 }}
+                  pathOptions={{ color: NAV_COLOR, weight: 4, opacity: 0.85 }}
                 />
               )}
 
@@ -403,24 +422,12 @@ export function PetaTaktis() {
           navigation view get the full map instead of this card lingering
           over a third of the screen */}
       <AnimatePresence>
-        {selectedEvent && !showRouteSheet && !searching && !activeRoute && (
+        {selectedEvent && !searching && !navActive && (
           <EventPopup
             event={selectedEvent}
             userPos={userPos}
             onClose={() => setSelectedEvent(null)}
             onNavigate={handleNavigate}
-          />
-        )}
-      </AnimatePresence>
-
-      {/* Route selection sheet */}
-      <AnimatePresence>
-        {showRouteSheet && selectedEvent && (
-          <RouteSheet
-            event={selectedEvent}
-            userPos={userPos}
-            onClose={() => setShowRouteSheet(false)}
-            onSelectRoute={handleSelectRoute}
           />
         )}
       </AnimatePresence>

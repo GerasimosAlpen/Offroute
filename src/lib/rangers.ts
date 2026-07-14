@@ -17,3 +17,19 @@ export const RANGERS: Ranger[] = [
   { id: "charlie", name: "Andi", callsign: "TIM CHARLIE", offset: [0.003, -0.007] },
   { id: "delta", name: "Dewi", callsign: "TIM DELTA", offset: [-0.007, 0.006] },
 ];
+
+const SELF_RANGER_KEY = "offroute.personel.selfRangerId";
+
+/**
+ * Personel's own identity on this device — picked once from the same
+ * simulated roster radar already renders as markers, then persisted so a
+ * phone keeps the same callsign across reloads instead of re-rolling.
+ */
+export function getSelfRanger(): Ranger {
+  const storedId = localStorage.getItem(SELF_RANGER_KEY);
+  const found = RANGERS.find((r) => r.id === storedId);
+  if (found) return found;
+  const assigned = RANGERS[Math.floor(Math.random() * RANGERS.length)];
+  localStorage.setItem(SELF_RANGER_KEY, assigned.id);
+  return assigned;
+}

@@ -90,9 +90,12 @@ export const useCommsLogStore = create<CommsLogState>((set, get) => {
       const withTime = { ...entry, time: formatNow() };
       set((s) => ({ entries: [...s.entries, withTime] }));
       pendingOwnAppends.push({ sender: entry.sender, lead: entry.lead, body: entry.body });
-      commsApi.append(withTime).catch((err) => {
+      // The backend computes its own `time` server-side and its DTO has no
+      // `time` field — `forbidNonWhitelisted` rejects the request with 400 if
+      // it's included, so send only the fields the DTO actually declares.
+      commsApi.append(entry).catch((err) => {
         console.warn("[commsLog] Failed to persist entry to backend:", err);
-        void enqueueMutation({ domain: "commsLog", method: "commsApi.append", payload: withTime });
+        void enqueueMutation({ domain: "commsLog", method: "commsApi.append", payload: entry });
       });
     },
   };

@@ -56,14 +56,47 @@ interface EvacuationPointsState {
    * safe point so everyone can see how to get there.
    */
   mark: (incidentPos: [number, number], ranger: Ranger, at: [number, number]) => Promise<void>;
+  /** Radar removes a point — it was wrong, or needs relocating (mark a new one afterward via the normal request/accept flow). */
+  remove: (id: string) => Promise<void>;
 }
+
+// Rangers this client itself just `mark()`-ed, waiting to be matched against
+// the `evac-confirmed` echo of its own `accept()` call (in
+// evacuationRequests.ts). `mark()`'s local point never gets its temp id
+// replaced with the server's real id anywhere in this file — the actual
+// `POST /evacuation/accept/:id` call lives in evacuationRequests.ts, not
+// here — so an id-only dedup check here can NEVER match, meaning every
+// locally-marked point used to get added a second time the moment its own
+// confirmation echo arrived. Found via manual testing (a real, always-on
+// duplicate, not just an occasional race like the analogous fix in
+// commsLog.ts/evacuationRequests.ts).
+const pendingOwnPoints = new Set<string>();
 
 export const useEvacuationPointsStore = create<EvacuationPointsState>((set, get) => {
   // Real-time: another client's accepted evacuation request shows up here too
   socket.on("evac-confirmed", (point: ApiEvacuationPoint) => {
     if (!point || typeof point.id !== "string") return; // malformed payload, ignore rather than throw
+
+    if (pendingOwnPoints.has(point.rangerId)) {
+      pendingOwnPoints.delete(point.rangerId);
+      set((s) => ({
+        points: s.points.map((p) =>
+          p.rangerId === point.rangerId && p.id !== point.id
+            ? { ...apiPointToLocal(point), route: p.route } // keep the route this tab already animated
+            : p,
+        ),
+      }));
+      return;
+    }
+
     const exists = get().points.some((p) => p.id === point.id);
     if (!exists) set((s) => ({ points: [...s.points, apiPointToLocal(point)] }));
+  });
+
+  // Real-time: another client (or this one) removing/relocating a point
+  socket.on("evac-removed", (payload: { id?: string }) => {
+    if (!payload || typeof payload.id !== "string") return; // malformed payload, ignore rather than throw
+    set((s) => ({ points: s.points.filter((p) => p.id !== payload.id) }));
   });
 
   return {
@@ -86,6 +119,7 @@ export const useEvacuationPointsStore = create<EvacuationPointsState>((set, get)
 
     mark: async (incidentPos, ranger, at) => {
       const id = `${ranger.id}-${Date.now()}`;
+      pendingOwnPoints.add(ranger.id);
       set((s) => ({
         points: [
           ...s.points,
@@ -113,6 +147,32 @@ export const useEvacuationPointsStore = create<EvacuationPointsState>((set, get)
       await animateRouteReveal(route, 900, (partial) => {
         set((s) => ({ points: s.points.map((p) => (p.id === id ? { ...p, route: partial } : p)) }));
       });
+    },
+
+    remove: async (id) => {
+      const point = get().points.find((p) => p.id === id);
+      // Optimistic removal — filtering out an id that's already gone (e.g.
+      // the evac-removed echo arriving afterward) is a safe no-op, unlike
+      // the add-path races elsewhere in this file, so no dedup bookkeeping
+      // is needed here.
+      set((s) => ({ points: s.points.filter((p) => p.id !== id) }));
+
+      if (point) {
+        useCommsLogStore.getState().append({
+          sender: "PUSAT",
+          color: "#ff0040",
+          lead: "TITIK EVAKUASI DIHAPUS",
+          body: `titik evakuasi ${point.rangerName} (${point.callsign}) dihapus/direlokasi.`,
+        });
+      }
+
+      try {
+        await evacuationApi.removePoint(id);
+      } catch (err) {
+        console.warn("[evacuationPoints] Failed to persist removal to backend:", err);
+        // Keep it removed locally — an operator who removed a bad point
+        // expects it gone regardless of backend reachability.
+      }
     },
   };
 });

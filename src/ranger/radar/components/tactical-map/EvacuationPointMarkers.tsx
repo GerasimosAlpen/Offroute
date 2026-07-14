@@ -24,14 +24,23 @@ export function EvacuationPointMarkers() {
         layers.push(
           <Marker key={`${point.id}-marker`} position={[point.lat, point.lon]} icon={EVAC_POINT_ICON}>
             <Popup>
-              <div className="font-mono text-xs flex flex-col gap-1">
-                <span className="font-bold text-[#131313]">
-                  {point.rangerName} · {point.callsign}
-                </span>
-                <span>Titik evakuasi aman — seluruh korban dalam kondisi baik.</span>
-                <span className="text-[10px] text-zinc-500">
-                  {new Date(point.timestamp).toLocaleTimeString()}
-                </span>
+              <div className="font-mono text-xs flex flex-col gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="font-bold text-[#131313]">
+                    {point.rangerName} · {point.callsign}
+                  </span>
+                  <span>Titik evakuasi aman — seluruh korban dalam kondisi baik.</span>
+                  <span className="text-[10px] text-zinc-500">
+                    {new Date(point.timestamp).toLocaleTimeString()}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void useEvacuationPointsStore.getState().remove(point.id)}
+                  className="text-[10px] uppercase tracking-wide text-[#ff0040] border border-[#ff0040] px-2 py-1 hover:bg-[#ff0040]/10 self-start"
+                >
+                  Hapus / Relokasi
+                </button>
               </div>
             </Popup>
           </Marker>,

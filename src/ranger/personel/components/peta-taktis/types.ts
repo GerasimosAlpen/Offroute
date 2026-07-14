@@ -1,5 +1,3 @@
-import type { Skull } from "lucide-preact";
-
 export interface EventMarker {
   id: string;
   name: string;
@@ -9,19 +7,6 @@ export interface EventMarker {
   pos: [number, number];
   distance: string;
   affected: number;
-}
-
-export interface RouteOption {
-  id: "fastest" | "moderate" | "safest";
-  label: string;
-  sublabel: string;
-  time: string;
-  distance: string;
-  danger: "tinggi" | "sedang" | "rendah";
-  dangerLabel: string;
-  color: string;
-  borderColor: string;
-  icon: typeof Skull;
 }
 
 export const DANGER_COLORS: Record<string, { border: string; bg: string; text: string; glow: string }> = {

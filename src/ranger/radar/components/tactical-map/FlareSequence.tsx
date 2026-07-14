@@ -30,6 +30,16 @@ export const ACTIVE_DRILL_PHASES: FlarePhase[] = ["detect", "scan", "dispatch", 
 
 const TRAIL_LENGTH = 6;
 
+// Survives this component unmounting/remounting (e.g. the operator
+// navigating to another radar page and back to Tactical Map) — without
+// this, `useEffect(..., [sequence])` re-runs on every fresh mount for
+// whatever `sequence` already is, replaying the entire cinematic (shake,
+// flash, dispatch animation, duplicate comms-log lines, everything) even
+// though nothing new was actually triggered. Found via manual testing:
+// navigating away mid-drill or after it had already gone calm and back
+// caused a full, confusing replay every single time.
+let lastPlayedSequence = 0;
+
 /**
  * Owns the whole cinematic choreography: freeze-frame beat → detect → zoom
  * out to available rangers → pick nearest → animate them along a route
@@ -85,6 +95,8 @@ export function FlareSequence({
 
   useEffect(() => {
     if (sequence === 0) return;
+    if (sequence === lastPlayedSequence) return; // already played this one — a remount, not a new trigger
+    lastPlayedSequence = sequence;
     let cancelled = false;
     const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
     const log = useCommsLogStore.getState().append;

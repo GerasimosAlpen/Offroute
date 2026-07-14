@@ -54,14 +54,31 @@ export const useFlareStore = create<FlareState>((set, get) => {
       // Optimistic update first so the UI reacts instantly
       set((s) => ({ active: true, sequence: s.sequence + 1, seen: false }));
 
-      const mySequence = get().sequence;
+      // `let`, not `const` — corrected below once the backend's real
+      // sequence comes back, so the auto-expiry timer (and its own stale
+      // check) keeps watching the right number.
+      let watchedSequence = get().sequence;
       if (autoExpiryTimer) clearTimeout(autoExpiryTimer);
       autoExpiryTimer = setTimeout(() => {
-        if (get().active && get().sequence === mySequence) void get().deactivate();
+        if (get().active && get().sequence === watchedSequence) void get().deactivate();
       }, AUTO_EXPIRY_MS);
 
       try {
-        await flareApi.activate();
+        const created = await flareApi.activate();
+        // The backend computes its own sequence from existing FlareAlert
+        // rows, independent of this client's optimistic guess — they only
+        // coincide on a client's very first-ever trigger. Correct the local
+        // value here, synchronously on the HTTP response, so it already
+        // matches by the time the flare-broadcast echo of this same
+        // activation arrives. Without this, the echo's (differing) sequence
+        // looks like a brand-new FLARE to FlareSequence's
+        // `useEffect(..., [sequence])` and restarts the whole cinematic
+        // mid-flight — this is exactly what caused a duplicated "DETEKSI"
+        // log line, found via manual testing.
+        if (typeof created?.sequence === "number" && created.sequence !== watchedSequence) {
+          watchedSequence = created.sequence;
+          set({ sequence: created.sequence });
+        }
       } catch (err) {
         console.warn("[flare] Failed to persist FLARE to backend:", err);
         // Keep optimistic state — FLARE must show even if backend is unreachable

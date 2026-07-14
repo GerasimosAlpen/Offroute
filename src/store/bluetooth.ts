@@ -30,13 +30,21 @@ interface BluetoothState {
   scanning: boolean;
   devices: BleDevice[];
   messages: BleMessage[];
+  /** Scan/list-level errors only (affects the whole card) — connect/send failures are per-device, see `deviceErrors`. */
   lastError: string | null;
+  /** Keyed by device id — a failed connect/send on one device shouldn't read as "everything is broken" for every other row. */
+  deviceErrors: Record<string, string>;
   startScan: () => Promise<void>;
   stopScan: () => Promise<void>;
   refreshDevices: () => Promise<void>;
   connect: (deviceId: string) => Promise<void>;
   disconnect: (deviceId: string) => Promise<void>;
   sendMessage: (deviceId: string, text: string) => Promise<void>;
+}
+
+function withoutKey(record: Record<string, string>, key: string): Record<string, string> {
+  const { [key]: _omit, ...rest } = record;
+  return rest;
 }
 
 // Polls ble_list_devices while scanning — btleplug discovers peripherals
@@ -63,6 +71,7 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
   devices: [],
   messages: [],
   lastError: null,
+  deviceErrors: {},
 
   refreshDevices: async () => {
     if (!isTauri) return;
@@ -106,12 +115,13 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
 
   connect: async (deviceId) => {
     if (!isTauri) return;
+    set((s) => ({ deviceErrors: withoutKey(s.deviceErrors, deviceId) }));
     try {
       await invoke("ble_connect", { deviceId });
       void get().refreshDevices();
     } catch (err) {
       console.warn(`[bluetooth] Failed to connect to ${deviceId}:`, err);
-      set({ lastError: String(err) });
+      set((s) => ({ deviceErrors: { ...s.deviceErrors, [deviceId]: String(err) } }));
     }
   },
 
@@ -127,11 +137,12 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
 
   sendMessage: async (deviceId, text) => {
     if (!isTauri) return;
+    set((s) => ({ deviceErrors: withoutKey(s.deviceErrors, deviceId) }));
     try {
       await invoke("ble_send_message", { deviceId, text });
     } catch (err) {
       console.warn(`[bluetooth] Failed to send message to ${deviceId}:`, err);
-      set({ lastError: String(err) });
+      set((s) => ({ deviceErrors: { ...s.deviceErrors, [deviceId]: String(err) } }));
     }
   },
 }));

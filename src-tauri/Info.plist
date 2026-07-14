@@ -4,5 +4,9 @@
 <dict>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Offroute uses Bluetooth to relay status and location data between rangers when the network is unreachable.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Offroute uses your location to place you on the tactical map and share your position with radar in realtime.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Offroute uses your location to place you on the tactical map and share your position with radar in realtime.</string>
 </dict>
 </plist>
