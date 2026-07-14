@@ -5,7 +5,7 @@ export function metersBetween(a: [number, number], b: [number, number]) {
   return Math.sqrt(latM ** 2 + lonM ** 2);
 }
 
-function routeLengthMeters(points: [number, number][]) {
+export function routeLengthMeters(points: [number, number][]) {
   let total = 0;
   for (let i = 1; i < points.length; i++) total += metersBetween(points[i - 1], points[i]);
   return total;
@@ -55,18 +55,26 @@ export async function fetchRoadRoute(
   }
 }
 
-/** Fallback for when OSRM is unreachable — bends a straight line into a gentle curve so it isn't a perfectly artificial line, nothing more. */
+/**
+ * Fallback for when OSRM is unreachable — bends a straight line into a
+ * gentle curve so it isn't a perfectly artificial line, nothing more.
+ * `bend` (fraction of the leg length, signed) controls how far and which
+ * direction the curve bows — varying it is how the personel-side "route
+ * search" visualization (`PetaTaktis.tsx`) draws a spread of distinct
+ * candidate paths from the same start/end pair.
+ */
 export function buildFallbackRoute(
   start: [number, number],
   end: [number, number],
   steps = 40,
+  bend = 0.18,
 ): [number, number][] {
   const midLat = (start[0] + end[0]) / 2;
   const midLon = (start[1] + end[1]) / 2;
   const dLat = end[0] - start[0];
   const dLon = end[1] - start[1];
-  const bendLat = midLat + dLon * 0.18;
-  const bendLon = midLon - dLat * 0.18;
+  const bendLat = midLat + dLon * bend;
+  const bendLon = midLon - dLat * bend;
 
   const points: [number, number][] = [];
   for (let i = 0; i <= steps; i++) {

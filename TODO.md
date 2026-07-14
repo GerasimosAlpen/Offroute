@@ -211,6 +211,44 @@ that didn't refer to the same incidents/people. Fixed as part of building
 task assignment below, since "assign a ranger to a hazard" doesn't make
 sense if the two views disagree on what a hazard even is.
 
+## Personel map routing now shares radar's real routing engine — built
+
+`PetaTaktis.tsx` (personel's tactical map) used to fake navigation entirely:
+distance was a hand-rolled flat-earth calc duplicating `metersBetween`, the
+three route options (fastest/moderate/safest) were arbitrary time/distance
+multipliers with no real geometry, and picking one just set UI state — no
+polyline was ever drawn (the comment literally said `// In production:
+trigger OSRM routing & draw polyline`). `src/lib/routing.ts` was already a
+plain shared module (no radar-only state), just never imported here.
+
+Now personel imports the same functions radar uses to dispatch units —
+`metersBetween`, `fetchRoadRoute`, `buildFallbackRoute`, `animateRouteReveal`
+— so both roles run on one routing engine instead of two divergent ones.
+Selecting a route option fetches a real OSRM road-snapped path from the
+ranger's GPS position to the incident (falling back to the bezier-curve
+approximation if OSRM's unreachable), draws it progressively via
+`animateRouteReveal`, and renders it as a `<Polyline>`. A `routeToken` ref
+guards against a stale reveal (from a route the operator already abandoned)
+overwriting a newer one if routes are switched quickly.
+
+Still simulated/left for later: the three route *options* shown before
+selection remain synthetic multipliers on straight-line distance rather than
+three actually-distinct OSRM routes (OSRM's free demo endpoint doesn't do
+alternatives cleanly) — only the one actually picked gets a real path.
+
+**"Searching for the best route" flicker — purely cosmetic.** The real OSRM
+fetch is usually sub-second, which read as an instant snap with nothing
+communicated. While `fetchRoadRoute` is in flight, `PetaTaktis.tsx` now
+flickers a new jittered fake candidate path (`buildFallbackRoute` bent
+toward a randomized point near the destination) roughly every 80ms, alongside
+a rising "N KOMBINASI DIUJI" (combinations tried) counter in the active-route
+banner — neither the candidate paths nor the counter are real; no actual
+route comparison happens, it's there purely so the (fast) wait *reads* as the
+algorithm doing visible work rather than a stall. A `Promise.all` floor of
+650ms keeps it from being a single invisible frame on a fast connection. All
+gated by the same `routeToken` ref as the real reveal, so switching routes
+mid-flicker doesn't leave a stale animation running.
+
 ## Realtime task-based ranger tracking + smooth glide — built
 
 "Budi takes the crash task" now works for any hazard, not just the FLARE
