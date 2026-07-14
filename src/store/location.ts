@@ -150,3 +150,18 @@ export function useDeviceLocation(): LocationState {
   startWatching();
   return useLocationStore();
 }
+
+/**
+ * Manual override — the fallback when GPS genuinely isn't available (e.g.
+ * Tauri's WKWebView on macOS can fail to even surface the OS permission
+ * prompt, a `wry` limitation, not something an Info.plist entry alone
+ * fixes). Radar is a stationary command post anyway, so a one-time manual
+ * "set base position" is a reasonable substitute, not just a workaround —
+ * it doesn't need continuous tracking the way a field ranger's phone does.
+ */
+export function setManualLocation(lat: number, lon: number, label?: string) {
+  lastCoordsKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
+  const resolvedLabel = label?.trim() || formatCoords(lat, lon);
+  useLocationStore.setState({ status: "ready", label: resolvedLabel, coords: { lat, lon } });
+  void setPersisted<CachedLocation>(STORAGE_KEY, { label: resolvedLabel, lat, lon });
+}

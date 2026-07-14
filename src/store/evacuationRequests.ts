@@ -2,8 +2,10 @@ import { create } from "zustand";
 import { RANGERS, type Ranger } from "@/lib/rangers";
 import { evacuationApi, type CreateEvacRequestDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
 import { useCommsLogStore } from "./commsLog";
 import { useEvacuationPointsStore } from "./evacuationPoints";
+import { raiseAlert } from "@/lib/alerts";
 
 export interface EvacuationPingRequest {
   id: string;
@@ -52,13 +54,38 @@ interface EvacuationRequestsState {
   reject: (id: string) => void;
 }
 
+// Rangers this client itself just submitted a request for, waiting to be
+// matched against their own echo off the socket — by rangerId (a ranger only
+// ever has one open request at a time in this flow), not by exact id. The
+// optimistic entry added in `request()` below is keyed by a temp local id;
+// if the `evac-request` broadcast echo arrives before that same request's
+// own HTTP response does (a real race — found via manual testing, the same
+// class of bug already fixed in commsLog.ts), an id-only dedup check
+// wrongly treats the echo as a brand-new request and adds a second card for
+// the same ranger.
+const pendingOwnRequests = new Set<string>();
+
 export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, get) => {
   // Real-time: another client's evacuation ping shows up here too, awaiting the same accept/reject
   socket.on("evac-request", (req: ApiEvacuationRequest) => {
     if (!req || typeof req.id !== "string") return; // malformed payload, ignore rather than throw
     if (req.accepted !== null) return;
+
+    if (pendingOwnRequests.has(req.rangerId)) {
+      pendingOwnRequests.delete(req.rangerId);
+      // Correct the optimistic entry's temp id to the real server id in
+      // place, rather than adding a second entry for the same request.
+      set((s) => ({
+        pending: s.pending.map((p) => (p.ranger.id === req.rangerId && p.id !== req.id ? apiRequestToLocal(req) : p)),
+      }));
+      return;
+    }
+
     const exists = get().pending.some((p) => p.id === req.id);
-    if (!exists) set((s) => ({ pending: [...s.pending, apiRequestToLocal(req)] }));
+    if (!exists) {
+      set((s) => ({ pending: [...s.pending, apiRequestToLocal(req)] }));
+      raiseAlert("Permintaan evakuasi baru", `${req.rangerName} (${req.callsign}) mengajukan titik evakuasi.`);
+    }
   });
 
   return {
@@ -69,10 +96,13 @@ export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, 
       if (get().loaded) return;
       try {
         const remote = await evacuationApi.pending();
-        set({ pending: (remote as ApiEvacuationRequest[]).map(apiRequestToLocal), loaded: true });
+        const pending = (remote as ApiEvacuationRequest[]).map(apiRequestToLocal);
+        set({ pending, loaded: true });
+        void cacheSet("evacuationRequests", pending);
       } catch (err) {
         console.warn("[evacReq] Failed to load pending from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<EvacuationPingRequest>("evacuationRequests");
+        set({ pending: cached, loaded: true });
       }
     },
 
@@ -80,6 +110,7 @@ export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, 
       const id = `${ranger.id}-${Date.now()}`;
       // Optimistic add
       set((s) => ({ pending: [...s.pending, { id, ranger, at, incidentPos, timestamp: Date.now() }] }));
+      pendingOwnRequests.add(ranger.id);
 
       useCommsLogStore.getState().append({
         sender: `${ranger.name} (${ranger.callsign})`,
@@ -99,11 +130,13 @@ export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, 
           incidentLon: incidentPos[1],
         };
         const saved = await evacuationApi.request(dto);
+        pendingOwnRequests.delete(ranger.id);
         // Replace local optimistic ID with server-assigned ID
         set((s) => ({
           pending: s.pending.map((p) => (p.id === id ? { ...p, id: saved.id } : p)),
         }));
       } catch (err) {
+        pendingOwnRequests.delete(ranger.id);
         console.warn("[evacReq] Failed to persist request to backend:", err);
       }
     },

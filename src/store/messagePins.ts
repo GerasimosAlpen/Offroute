@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { messagesApi, type CreateMessagePinDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
 
 export interface MessagePin {
   id: string;
@@ -33,6 +34,13 @@ function apiPinToLocal(p: Record<string, unknown>): MessagePin {
   };
 }
 
+// Rangers this client itself just posted a pin for, waiting to be matched
+// against their own echo off the socket — by rangerId, not exact id, since
+// the optimistic entry's temp id differs from the server's real one until
+// `addPin`'s own HTTP response resolves, and the socket echo can arrive
+// first (same race already fixed in commsLog.ts/evacuationRequests.ts).
+const pendingOwnPins = new Set<string>();
+
 /**
  * Geotagged status messages from personel.
  * Persisted to backend (POST /messages/pin) and live via message-pin WS event.
@@ -41,6 +49,17 @@ export const useMessagePinsStore = create<MessagePinsState>((set, get) => {
   // Real-time: any client posting a pin broadcasts it to all others
   socket.on("message-pin", (pin: Record<string, unknown>) => {
     if (!pin || typeof pin.id !== "string") return; // malformed payload, ignore rather than throw
+    const rangerId = pin.rangerId as string;
+
+    if (pendingOwnPins.has(rangerId)) {
+      pendingOwnPins.delete(rangerId);
+      const local = apiPinToLocal(pin);
+      set((s) => ({
+        pins: s.pins.map((p) => (p.rangerId === rangerId && p.id !== local.id ? local : p)),
+      }));
+      return;
+    }
+
     const local = apiPinToLocal(pin);
     const exists = get().pins.some((p) => p.id === local.id);
     if (!exists) set((s) => ({ pins: [...s.pins, local] }));
@@ -54,10 +73,13 @@ export const useMessagePinsStore = create<MessagePinsState>((set, get) => {
       if (get().loaded) return;
       try {
         const remote = await messagesApi.pins();
-        set({ pins: remote.map(apiPinToLocal), loaded: true });
+        const pins = remote.map(apiPinToLocal);
+        set({ pins, loaded: true });
+        void cacheSet("messagePins", pins);
       } catch (err) {
         console.warn("[messagePins] Failed to load from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<MessagePin>("messagePins");
+        set({ pins: cached, loaded: true });
       }
     },
 

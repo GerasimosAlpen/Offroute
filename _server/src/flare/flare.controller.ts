@@ -20,4 +20,11 @@ export class FlareController {
   activate() {
     return this.flareService.activate();
   }
+
+  @Post("deactivate")
+  @ApiOperation({ summary: "Stand down an active FLARE. Broadcasts flare-broadcast WS event with status calm." })
+  @ApiResponse({ status: 200, description: "FlareAlert updated to calm, or unchanged if none was active" })
+  deactivate() {
+    return this.flareService.deactivate();
+  }
 }

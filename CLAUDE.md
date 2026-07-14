@@ -4,41 +4,11 @@
 
 # Active Roadmap: Ranger Feature
 
-## Status
+## Status (corrected 2026-07-14 — see TODO.md for full detail, this section was badly stale)
 
-`src/ranger/README.md` is a spec only — zero implementation as of this writing. No router, no ranger routes/components, no realtime layer, no data model. Root `README.md` has no mention of ranger at all — it's just the tech-stack table.
+Everything described as "zero implementation" / "deferred" below this line used to be true but no longer is. As of 2026-07-14: routing, data model, backend REST + WebSocket realtime, radar UI (tactical map, dispatch, FLARE, comms, evac points/requests, Lapor Incident), a real SQLite offline cache, and a real (compile-verified, hardware-untested) desktop BLE Tier 1 relay all exist. `TODO.md` is the accurate, maintained source of truth for what's built vs. simulated vs. still deferred — **read that first**, not this file, for current state. This section is kept only for the two genuinely still-open items below.
 
-Build order: **ranger page first (radar role → personel role), user page after.**
+**Resolved 2026-07-14:** personel is **mobile-priority** (confirmed by the user, no longer open) — the opposite of radar's desktop-only gate. `PersonelPage.tsx` has no `DesktopOnlyGate` (that's radar-only, see `RadarPage.tsx`). This means responsive-first CSS/layout for any screen size — explicitly **not** a phone-mockup frame (border/rounded-corners/letterboxing was tried and reverted per the user's direct correction: "making this mobile responsive... not making it look like a phone"). This is a **web-view mobile UI**, not a separate native mobile compile target — real native mobile work (App Store/Play Store build via Tauri's mobile target) is a separate, bigger decision not made here.
 
-## Ranger Spec Recap
-
-Desktop-only page (per `src/ranger/README.md`), two roles:
-
-- **radar** — desktop only. Watches reports/conditions, dispatches personel, marks incidents (flood, tsunami, earthquake), sends FLARE for major incidents, gives evacuation routes, communicates with personel.
-- **personel** — phone version. Patrols, reacts fast, communicates status to radar, requests tools/evac route, takes control if none given.
-
-Requirements: realtime data stream, hardware status control, offline mode w/ Bluetooth fallback if radar location is unreachable, best-route finding, lightweight/easy to use.
-
-**Open question:** `personel` is spec'd as "phone version" but this repo is a Tauri **desktop** app. Needs a platform decision (separate mobile target vs. web view) before personel UI work starts — do not assume until confirmed.
-
-## Phase Plan
-
-1. **Routing** — `wouter` installed (lightweight, matches perf goals — no react-router). Add `/ranger/radar`, `/ranger/personel` routes. Enforce desktop-only via `@tauri-apps/plugin-os` (installed) — gate ranger routes off on mobile/small viewport.
-2. **Data model** (Prisma, currently empty in `_server/prisma/schema.prisma`) — `User` (role: RADAR | PERSONEL), `Node` (location), `Report`/`Incident`, `FlareAlert`, `EvacuationRoute`.
-3. **Backend realtime** — NestJS `ranger` module: REST controller + WebSocket gateway. `socket.io-client` installed on frontend for this.
-4. **Radar UI** — Leaflet map (already wired in `App.tsx` demo — `MapCard`), incident markers, dispatch action, FLARE trigger, comms panel, evac-route panel.
-5. **Personel UI** — blocked on the platform decision above.
-6. **Best-route algo** — deferred. Options: Dijkstra over the node graph (Rust, `petgraph`) for offline capability, or external routing service (OSRM/GraphHopper) if online-only is acceptable. Decide once offline requirement is scoped.
-7. **Offline/Bluetooth failover** — deferred, flagged as a research spike. No official Tauri Bluetooth plugin exists; would need a custom Rust module (e.g. `btleplug`). Do not start building against this until scoped separately.
-
-## Dependencies Added So Far
-
-Frontend (`package.json`, installed via `deno add`):
-- `wouter` — router for ranger/user page navigation
-- `socket.io-client` — realtime stream client for radar↔personel communication
-- `@tauri-apps/plugin-os` — JS binding for platform/OS detection
-
-Rust (`src-tauri/Cargo.toml`):
-- `tauri-plugin-os` — registered in `lib.rs`, permission `os:default` added to `src-tauri/capabilities/default.json`. Used to enforce desktop-only rendering of the ranger page and read platform info.
-
-Not yet added (deferred until their phase): NestJS WebSocket gateway deps (`@nestjs/websockets`, `socket.io`), `petgraph` (routing algo), any Bluetooth crate.
+**Still open:**
+- **Bluetooth Tier 2 (victim-as-beacon)** — intentionally not built. See TODO.md's "Bluetooth — two tiers" section: needs a native mobile peripheral/GATT-server role (Swift CoreBluetooth, Kotlin BLE) that doesn't exist in Tauri, and iOS enforces a hard OS-level restriction on background BLE advertising that no framework can bypass. Desktop-to-desktop BLE relay (not just talking to a third-party peripheral) is also not yet possible — `btleplug` (used for the built Tier 1) is central/client-only; hosting a GATT server needs `bluer` (Linux only) or native FFI (macOS/Windows).

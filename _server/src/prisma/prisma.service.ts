@@ -33,6 +33,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get evacuationRequest() { return this.client.evacuationRequest; }
   get flareAlert() { return this.client.flareAlert; }
   get flareDispatch() { return this.client.flareDispatch; }
+  get victim() { return this.client.victim; }
 
   async onModuleInit() {
     await this.client.$connect();

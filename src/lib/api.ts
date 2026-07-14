@@ -30,16 +30,18 @@ export const tasksApi = {
 };
 
 export const flareApi = {
-  current:  () => api.get("/flare/current").then((r) => r.data),
-  activate: () => api.post("/flare/activate").then((r) => r.data),
+  current:    () => api.get("/flare/current").then((r) => r.data),
+  activate:   () => api.post("/flare/activate").then((r) => r.data),
+  deactivate: () => api.post("/flare/deactivate").then((r) => r.data),
 };
 
 export const evacuationApi = {
-  points:  () => api.get("/evacuation/points").then((r) => r.data),
-  pending: () => api.get("/evacuation/pending").then((r) => r.data),
-  request: (dto: CreateEvacRequestDto) => api.post("/evacuation/request", dto).then((r) => r.data),
-  accept:  (id: string) => api.post(`/evacuation/accept/${id}`).then((r) => r.data),
-  reject:  (id: string) => api.post(`/evacuation/reject/${id}`).then((r) => r.data),
+  points:      () => api.get("/evacuation/points").then((r) => r.data),
+  pending:     () => api.get("/evacuation/pending").then((r) => r.data),
+  request:     (dto: CreateEvacRequestDto) => api.post("/evacuation/request", dto).then((r) => r.data),
+  accept:      (id: string) => api.post(`/evacuation/accept/${id}`).then((r) => r.data),
+  reject:      (id: string) => api.post(`/evacuation/reject/${id}`).then((r) => r.data),
+  removePoint: (id: string) => api.delete(`/evacuation/points/${id}`).then((r) => r.data),
 };
 
 export const messagesApi = {
@@ -49,6 +51,16 @@ export const messagesApi = {
 
 export const commsApi = {
   history: () => api.get("/comms/history").then((r) => r.data),
+  append:  (dto: CreateCommsEntryDto) => api.post("/comms", dto).then((r) => r.data),
+};
+
+export const victimsApi = {
+  active:       () => api.get<Victim[]>("/victims/active").then((r) => r.data),
+  sos:          (dto: SosPingDto) => api.post<Victim>("/victims/sos", dto).then((r) => r.data),
+  assign:       (id: string, dto: RangerRefDto) => api.post<Victim>(`/victims/${id}/assign`, dto).then((r) => r.data),
+  report:       (id: string, dto: RangerRefDto) => api.post<Victim>(`/victims/${id}/report`, dto).then((r) => r.data),
+  rejectReport: (id: string) => api.post<Victim>(`/victims/${id}/reject-report`).then((r) => r.data),
+  confirm:      (id: string) => api.post(`/victims/${id}/confirm`).then((r) => r.data),
 };
 
 // ─── DTO / Response types (mirrors backend contracts) ─────────────────────────
@@ -112,4 +124,40 @@ export interface CreateMessagePinDto {
   text: string;
   lat: number;
   lon: number;
+}
+
+export interface CreateCommsEntryDto {
+  sender: string;
+  color: string;
+  lead: string;
+  body: string;
+}
+
+export interface Victim {
+  id: string;
+  label: string | null;
+  lat: number;
+  lon: number;
+  status: "active" | "rescued";
+  assignedRangerId: string | null;
+  assignedRangerName: string | null;
+  assignedCallsign: string | null;
+  reportedRangerId: string | null;
+  reportedRangerName: string | null;
+  reportedCallsign: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+}
+
+export interface SosPingDto {
+  id: string;
+  label?: string;
+  lat: number;
+  lon: number;
+}
+
+export interface RangerRefDto {
+  rangerId: string;
+  rangerName: string;
+  callsign: string;
 }

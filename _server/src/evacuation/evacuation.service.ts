@@ -55,4 +55,14 @@ export class EvacuationService {
 
     return this.prisma.evacuationRequest.update({ where: { id }, data: { accepted: false } });
   }
+
+  /** Radar removes a confirmed point — e.g. it was wrong or needs relocating (a new one can be marked via the normal request/accept flow afterward). Broadcasts removal to every client. */
+  async removePoint(id: string) {
+    const point = await this.prisma.evacuationPoint.findUnique({ where: { id } });
+    if (!point) throw new NotFoundException(`EvacuationPoint ${id} not found`);
+
+    await this.prisma.evacuationPoint.delete({ where: { id } });
+    this.gateway.emit("evac-removed", { id });
+    return { id };
+  }
 }

@@ -8,6 +8,7 @@ import { FlareModule } from "./flare/flare.module";
 import { EvacuationModule } from "./evacuation/evacuation.module";
 import { MessagesModule } from "./messages/messages.module";
 import { CommsModule } from "./comms/comms.module";
+import { VictimsModule } from "./victims/victims.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { CommsModule } from "./comms/comms.module";
     EvacuationModule,
     MessagesModule,
     CommsModule,
+    VictimsModule,
   ],
 })
 export class AppModule {}

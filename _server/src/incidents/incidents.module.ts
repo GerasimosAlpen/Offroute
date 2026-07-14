@@ -1,11 +1,12 @@
 import { Module } from "@nestjs/common";
 import { IncidentsController } from "./incidents.controller";
 import { IncidentsService } from "./incidents.service";
-import { EventsGateway } from "../gateway/events.gateway";
+import { GatewayModule } from "../gateway/gateway.module";
 
 @Module({
+  imports: [GatewayModule],
   controllers: [IncidentsController],
-  providers: [IncidentsService, EventsGateway],
+  providers: [IncidentsService],
   exports: [IncidentsService],
 })
 export class IncidentsModule {}

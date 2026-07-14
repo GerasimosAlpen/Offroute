@@ -13,12 +13,13 @@ import { TailwindCard } from "@/components/demo/TailwindCard";
 import { LucideCard } from "@/components/demo/LucideCard";
 import { MapCard } from "@/components/demo/MapCard";
 import { RealtimeCard } from "@/components/demo/RealtimeCard";
+import { BluetoothCard } from "@/components/demo/BluetoothCard";
 
 const stack = [
   "Tauri v2", "Preact", "TypeScript", "Vite 6",
   "Tailwind v4", "Zustand v5", "TanStack Query",
   "Axios", "Valibot", "Effect-TS", "Framer Motion",
-  "Lucide", "SQLite", "Stronghold", "NestJS", "React Leaflet",
+  "Lucide", "SQLite", "Stronghold", "NestJS", "React Leaflet", "Bluetooth",
 ];
 
 export default function DemoPlayground() {
@@ -89,6 +90,7 @@ export default function DemoPlayground() {
           <LucideCard />
           <MapCard />
           <RealtimeCard />
+          <BluetoothCard />
         </div>
       </main>
     </div>
