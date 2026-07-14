@@ -2,12 +2,14 @@ import { useEffect } from "preact/hooks";
 import { create } from "zustand";
 import { socket } from "@/lib/socket";
 import type { Ranger } from "@/lib/rangers";
+import { useDutyStatusStore, type DutyStatus } from "./dutyStatus";
 
 export interface PresenceEntry {
   rangerId: string;
   name: string;
   callsign: string;
   lastSeen: number;
+  dutyStatus: DutyStatus;
 }
 
 interface PresenceState {
@@ -47,10 +49,19 @@ const HEARTBEAT_MS = 20_000;
  * entirely once the socket itself disconnects.
  */
 export function usePresenceHeartbeat(self: Ranger) {
+  const dutyStatus = useDutyStatusStore((s) => s.status);
+
   useEffect(() => {
-    const send = () => socket.emit("presence-heartbeat", { rangerId: self.id, name: self.name, callsign: self.callsign });
+    const send = () =>
+      socket.emit("presence-heartbeat", {
+        rangerId: self.id,
+        name: self.name,
+        callsign: self.callsign,
+        dutyStatus: useDutyStatusStore.getState().status,
+      });
     send();
     const timer = setInterval(send, HEARTBEAT_MS);
     return () => clearInterval(timer);
-  }, [self.id, self.name, self.callsign]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [self.id, self.name, self.callsign, dutyStatus]);
 }

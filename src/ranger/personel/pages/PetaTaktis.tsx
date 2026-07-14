@@ -15,6 +15,7 @@ import { IntroSequence } from "../components/peta-taktis/IntroSequence";
 import { LiveFollow } from "../components/peta-taktis/LiveFollow";
 import { RouteSearchSequence, type SearchParams } from "../components/peta-taktis/RouteSearchSequence";
 import { EventPopup } from "../components/peta-taktis/EventPopup";
+import { VictimSosDrawer } from "../components/VictimSosDrawer";
 import type { EventMarker } from "../components/peta-taktis/types";
 
 // Single accent for the active-navigation state — there's only one route now
@@ -415,6 +416,8 @@ export function PetaTaktis() {
             <span className="font-mono text-[8px] text-[#555] ml-1 bg-[#131313]/80 px-0.5">100m</span>
           </div>
         </div>
+
+        <VictimSosDrawer userPos={userPos} />
       </main>
 
       {/* Event popup (above nav bar) — hidden once a route is being searched

@@ -54,6 +54,15 @@ export const commsApi = {
   append:  (dto: CreateCommsEntryDto) => api.post("/comms", dto).then((r) => r.data),
 };
 
+export const victimsApi = {
+  active:       () => api.get<Victim[]>("/victims/active").then((r) => r.data),
+  sos:          (dto: SosPingDto) => api.post<Victim>("/victims/sos", dto).then((r) => r.data),
+  assign:       (id: string, dto: RangerRefDto) => api.post<Victim>(`/victims/${id}/assign`, dto).then((r) => r.data),
+  report:       (id: string, dto: RangerRefDto) => api.post<Victim>(`/victims/${id}/report`, dto).then((r) => r.data),
+  rejectReport: (id: string) => api.post<Victim>(`/victims/${id}/reject-report`).then((r) => r.data),
+  confirm:      (id: string) => api.post(`/victims/${id}/confirm`).then((r) => r.data),
+};
+
 // ─── DTO / Response types (mirrors backend contracts) ─────────────────────────
 
 export interface Personnel {
@@ -122,4 +131,33 @@ export interface CreateCommsEntryDto {
   color: string;
   lead: string;
   body: string;
+}
+
+export interface Victim {
+  id: string;
+  label: string | null;
+  lat: number;
+  lon: number;
+  status: "active" | "rescued";
+  assignedRangerId: string | null;
+  assignedRangerName: string | null;
+  assignedCallsign: string | null;
+  reportedRangerId: string | null;
+  reportedRangerName: string | null;
+  reportedCallsign: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+}
+
+export interface SosPingDto {
+  id: string;
+  label?: string;
+  lat: number;
+  lon: number;
+}
+
+export interface RangerRefDto {
+  rangerId: string;
+  rangerName: string;
+  callsign: string;
 }

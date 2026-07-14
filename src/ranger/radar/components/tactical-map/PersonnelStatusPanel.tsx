@@ -105,9 +105,16 @@ export function PersonnelStatusPanel() {
                   </span>
                 </div>
               </div>
-              <span className={`text-[10px] uppercase tracking-wide shrink-0 ${style.text}`}>
-                {style.label}
-              </span>
+              <div className="flex flex-col items-end gap-0.5 shrink-0">
+                <span className={`text-[10px] uppercase tracking-wide ${style.text}`}>
+                  {style.label}
+                </span>
+                {presence && (
+                  <span className={`text-[9px] uppercase tracking-wide ${presence.dutyStatus === "idle" ? "text-[#5fb3b3]" : "text-[#888]"}`}>
+                    {presence.dutyStatus === "idle" ? "IDLE" : "BERTUGAS"}
+                  </span>
+                )}
+              </div>
             </div>
           );
         })}

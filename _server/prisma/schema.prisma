@@ -136,6 +136,36 @@ model FlareDispatch {
   ranger    Personnel  @relation(fields: [rangerId], references: [id])
 }
 
+/// Victim/bystander SOS ping — not a ranger, just someone's own phone (via
+/// the no-install `/sos` page) reporting its real GPS position so search
+/// crews can find them. Mirrors Victim in victims.ts. Uses absolute lat/lon
+/// (unlike Incident's radar-relative offset) since this is a real GPS fix.
+/// Rescue is a two-step confirmation, not a radar-unilateral toggle: a
+/// personel unit that physically reaches the victim reports it (fills
+/// reportedRangerId/Name/Callsign); only radar accepting that report flips
+/// status to rescued. Mirrors EvacuationRequest's ranger-reports/radar-
+/// confirms shape.
+model Victim {
+  id                 String       @id
+  label              String?
+  lat                Float
+  lon                Float
+  status             VictimStatus @default(active)
+  assignedRangerId   String?
+  assignedRangerName String?
+  assignedCallsign   String?
+  reportedRangerId   String?
+  reportedRangerName String?
+  reportedCallsign   String?
+  lastSeenAt         DateTime     @updatedAt
+  createdAt          DateTime     @default(now())
+}
+
+enum VictimStatus {
+  active
+  rescued
+}
+
 enum HazardKind {
   fire
   blocked

@@ -14,6 +14,7 @@ export interface PresenceEntry {
   name: string;
   callsign: string;
   lastSeen: number;
+  dutyStatus: "on_duty" | "idle";
 }
 
 /**
@@ -30,6 +31,8 @@ export interface PresenceEntry {
  *  - comms-message     CommEntry payload
  *  - incident-new      Incident payload
  *  - presence-update   PresenceEntry[] — every currently-connected personel unit
+ *  - victim-sos        Victim payload — new or updated SOS ping from /sos
+ *  - victim-rescued    { id } — radar marked a victim as found
  *
  * Events received (Client → Server):
  *  - presence-heartbeat  { rangerId, name, callsign } — personel pings this
@@ -65,10 +68,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage("presence-heartbeat")
   handlePresenceHeartbeat(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { rangerId: string; name: string; callsign: string },
+    @MessageBody() body: { rangerId: string; name: string; callsign: string; dutyStatus?: "on_duty" | "idle" },
   ) {
     if (!body || typeof body.rangerId !== "string") return; // malformed payload, ignore rather than throw
-    this.presence.set(client.id, { ...body, lastSeen: Date.now() });
+    this.presence.set(client.id, { ...body, dutyStatus: body.dutyStatus ?? "on_duty", lastSeen: Date.now() });
     this.broadcastPresence();
   }
 

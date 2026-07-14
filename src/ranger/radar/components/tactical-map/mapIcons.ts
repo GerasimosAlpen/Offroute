@@ -80,6 +80,27 @@ export const VICTIM_ICON = L.divIcon({
   iconSize: [0, 0],
 });
 
+// Real SOS pings from `/sos` (real GPS, real person) — visually distinct
+// from VICTIM_ICON above, which is FLARE's simulated drill detection, not a
+// genuine report. Conflating the two on the map would be dishonest.
+export function buildSosIcon(label: string) {
+  return L.divIcon({
+    className: "",
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-100%);">
+        <div style="position:relative;width:30px;height:30px;display:flex;align-items:center;justify-content:center;">
+          <span class="animate-ping" style="position:absolute;inset:0;border-radius:9999px;background:#ff0040;opacity:0.6;"></span>
+          <span style="position:relative;width:13px;height:13px;border-radius:9999px;background:#ff0040;border:2px solid #fff;"></span>
+        </div>
+        <div style="background:#131313;border:1px solid #ff0040;padding:2px 8px;white-space:nowrap;">
+          <span style="color:#ff0040;font-family:'JetBrains Mono Variable',monospace;font-size:11px;text-transform:uppercase;font-weight:bold;">SOS — ${label}</span>
+        </div>
+      </div>
+    `,
+    iconSize: [0, 0],
+  });
+}
+
 export function buildRangerIcon(label: string) {
   return L.divIcon({
     className: "",

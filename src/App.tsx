@@ -5,6 +5,7 @@ import DemoPlayground from "@/pages/DemoPlayground";
 import RadarPage from "@/ranger/radar/RadarPage";
 import PersonelPage from "@/ranger/personel/PersonelPage";
 import UserPage from "@/user/UserPage";
+import SosPage from "@/ranger/sos/SosPage";
 import { loadFlareState } from "@/store/flare";
 import { useMessagePinsStore } from "@/store/messagePins";
 import { useTasksStore } from "@/store/tasks";
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="/ranger/radar/:tab?" component={RadarPage} />
         <Route path="/ranger/personel/:tab?" component={PersonelPage} />
         <Route path="/user/:tab?" component={UserPage} />
+        <Route path="/sos" component={SosPage} />
         <Route path="/" component={DemoPlayground} />
       </Switch>
     </Router>

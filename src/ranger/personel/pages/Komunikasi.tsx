@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
-import { Radio, WifiOff, PhoneCall, Siren } from "lucide-preact";
+import { Radio, WifiOff, PhoneCall, Siren, CheckCircle2 } from "lucide-preact";
 import { useCommsLogStore } from "@/store/commsLog";
 import { useOnlineStatus } from "@/lib/useOnlineStatus";
 import { useDeviceLocation } from "@/store/location";
 import { getSelfRanger } from "@/lib/rangers";
+import { useDutyStatusStore } from "@/store/dutyStatus";
 import { ChatBubble } from "@/ranger/comms/ChatBubble";
 import { BluetoothStatusBar } from "@/ranger/comms/BluetoothStatusBar";
 
@@ -38,8 +39,14 @@ export function Komunikasi() {
   const [self] = useState(getSelfRanger);
   const [contact, setContact] = useState<string>(ALL_CONTACTS);
   const endRef = useRef<HTMLDivElement>(null);
+  const dutyStatus = useDutyStatusStore((s) => s.status);
+  const setDutyStatus = useDutyStatusStore((s) => s.setStatus);
 
   const selfLabel = `${self.name} (${self.callsign})`;
+
+  const toggleDutyStatus = () => {
+    setDutyStatus(dutyStatus === "idle" ? "on_duty" : "idle", selfLabel);
+  };
 
   const requestBackup = () => {
     const posSuffix = coords
@@ -122,6 +129,21 @@ export function Komunikasi() {
             className="flex-1 flex items-center justify-center gap-1.5 py-2 border border-[#fabd00] bg-[#fabd00]/10 text-[#fabd00] font-mono text-[10px] uppercase tracking-wide active:scale-95 transition-transform"
           >
             <Siren size={12} /> Minta Backup
+          </button>
+        </div>
+
+        <div className="px-4 pb-2.5">
+          <button
+            type="button"
+            onClick={toggleDutyStatus}
+            className={`w-full flex items-center justify-center gap-1.5 py-2 border font-mono text-[10px] uppercase tracking-wide active:scale-95 transition-transform ${
+              dutyStatus === "idle"
+                ? "border-[#66df75] bg-[#66df75]/10 text-[#66df75]"
+                : "border-[#444] bg-[#262626] text-[#e1bec2]"
+            }`}
+          >
+            <CheckCircle2 size={12} />
+            {dutyStatus === "idle" ? "Status: IDLE — Tandai Bertugas Lagi" : "Tugas Selesai — Kembali Idle"}
           </button>
         </div>
 
