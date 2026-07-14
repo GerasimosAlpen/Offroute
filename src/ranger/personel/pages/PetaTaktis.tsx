@@ -1,10 +1,12 @@
-import { useState } from "preact/hooks";
-import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
-import { LocateFixed, Compass, X, Navigation, Flame, AlertTriangle, ChevronRight, Clock, Shield, Skull } from "lucide-preact";
+import { useEffect, useState } from "preact/hooks";
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from "react-leaflet";
+import { LocateFixed, Compass, X, Navigation, Flame, AlertTriangle, ChevronRight, Clock, Shield, Skull, Loader2, Check } from "lucide-preact";
 import L from "leaflet";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { useDeviceLocation } from "@/store/location";
+import { useDeviceHeading, startHeadingWatch } from "@/store/heading";
+import { metersBetween, fetchRoadRoute, buildFallbackRoute, animateRouteReveal, routeLengthMeters } from "@/lib/routing";
 import "@/lib/leaflet-setup";
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -50,6 +52,11 @@ const TYPE_ICONS_SVG: Record<string, string> = {
 
 // ─── Map Icons ───────────────────────────────────────────────────────────────
 
+// Markers sit inside the same wrapper that gets CSS-rotated to match device
+// heading (see the `--map-heading` var set in PetaTaktis below) — every
+// marker counter-rotates by that same var so labels/icons stay upright and
+// legible instead of spinning along with the base map. A no-op (0deg) when
+// heading isn't available, so nothing changes for the plain north-up case.
 function buildEventIcon(event: EventMarker) {
   const c = DANGER_COLORS[event.danger];
   const svg = TYPE_ICONS_SVG[event.type];
@@ -60,7 +67,7 @@ function buildEventIcon(event: EventMarker) {
   return L.divIcon({
     className: "",
     html: `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(-50%,-100%);">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(-50%,-100%) rotate(var(--map-heading, 0deg));">
         <div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:#1a1a1a;border:2px solid ${c.border};box-shadow:${c.glow};">
           ${pulse}
           ${svg}
@@ -83,10 +90,258 @@ const SELF_ICON = L.divIcon({
     <div style="position:relative;width:16px;height:16px;transform:translate(-50%,-50%);">
       <span style="position:absolute;inset:0;border-radius:9999px;background:#3ddc59;opacity:0.6;animation:pulse 2s infinite;"></span>
       <span style="position:absolute;inset:3px;border-radius:9999px;background:#3ddc59;border:2px solid #0a0a0a;"></span>
+      <span style="position:absolute;left:50%;top:-13px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #3ddc59;transform:translateX(-50%);opacity:var(--heading-available, 0);filter:drop-shadow(0 0 3px rgba(61,220,89,0.7));"></span>
     </div>
   `,
   iconSize: [0, 0],
 });
+
+// The fixed point a route search began from — distinct from the live SELF_ICON
+// dot, which keeps moving with GPS. Lets the crew see start vs. current
+// position vs. destination all at once instead of just one wandering dot.
+const START_ICON = L.divIcon({
+  className: "",
+  html: `
+    <div style="transform:translate(-50%,-100%) rotate(var(--map-heading, 0deg));">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8888ff" stroke-width="2.2" style="filter:drop-shadow(0 0 4px rgba(136,136,255,0.6));">
+        <path d="M5 21V4a1 1 0 0 1 1-1h11.5a.5.5 0 0 1 .4.8L14 9l3.9 5.2a.5.5 0 0 1-.4.8H6" />
+      </svg>
+    </div>
+  `,
+  iconSize: [0, 0],
+});
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+// ─── Route Search — "every combination" cinematic ──────────────────────────
+//
+// This whole section is a visualization, not a routing algorithm: OSRM's
+// free demo endpoint only ever returns one real path (see fetchRoadRoute in
+// src/lib/routing.ts), so there's no actual alternatives-comparison to show.
+// What's real is the *destination* — every candidate below terminates at the
+// same incident, and the winner is swapped for the genuine OSRM/fallback
+// geometry the instant it's ready. Everything in between (candidate count,
+// scores, terrain/risk labels) is generated client-side purely so a
+// sub-second network fetch reads as a deliberate multi-path search, sort-
+// algorithm-visualizer style, instead of an instant snap.
+
+const CANDIDATE_PALETTE = ["#66df75", "#fabd00", "#ffb2bd", "#3ddc59", "#8888ff", "#ff8a3d", "#4dd0e1", "#c792ea"];
+const TERRAIN_LABELS = ["ASPAL", "TANAH", "BERBATU", "BERLUMPUR"];
+const CANDIDATE_COUNT = 8;
+
+// Contingency checks run once the best route is picked — reassures the
+// on-field crew every likely failure mode along the way already has a
+// fallback, before they commit to moving. Entirely canned/simulated (see
+// note in TODO.md): nothing here reads real GPS/hazard state yet, it's a
+// fixed checklist that always "passes."
+const SCENARIOS: { label: string; result: string }[] = [
+  { label: "JALAN UTAMA TERTUTUP", result: "RUTE ALTERNATIF SIAP" },
+  { label: "LONGSOR / JALUR RUSAK", result: "REROUTE OTOMATIS AKTIF" },
+  { label: "SINYAL GPS TERPUTUS", result: "MODE OFFLINE + BLUETOOTH SIAP" },
+  { label: "ZONA BAHAYA BARU MUNCUL", result: "PERINGATAN & JALUR HINDARI" },
+  { label: "CUACA MEMBURUK", result: "KECEPATAN & RUTE DISESUAIKAN" },
+];
+
+type SearchPhase = "scanning" | "generating" | "evaluating" | "winner" | "contingency";
+
+interface SearchParams {
+  distanceKm: number;
+  timeMin: number;
+  risk: number;
+  terrain: string;
+}
+
+interface RouteCandidate {
+  id: number;
+  full: [number, number][];
+  revealed: [number, number][];
+  color: string;
+  distanceM: number;
+  timeMin: number;
+  risk: number;
+  terrain: string;
+  score: number;
+  dimmed: boolean;
+  isBest: boolean;
+}
+
+/** Spreads `count` distinct fake candidate paths (varied bend + slight endpoint jitter) between two points, each scored on invented distance/risk/terrain so a "best" can be picked. */
+function buildCandidates(userPos: [number, number], destPos: [number, number]): RouteCandidate[] {
+  return Array.from({ length: CANDIDATE_COUNT }, (_, i) => {
+    const bend = (i / (CANDIDATE_COUNT - 1) - 0.5) * 0.95;
+    const jitteredEnd: [number, number] = [
+      destPos[0] + (Math.random() - 0.5) * 0.0004,
+      destPos[1] + (Math.random() - 0.5) * 0.0004,
+    ];
+    const full = buildFallbackRoute(userPos, jitteredEnd, 26, bend);
+    const distanceM = routeLengthMeters(full);
+    const risk = Math.round(Math.random() * 90) + 5;
+    const terrain = TERRAIN_LABELS[Math.floor(Math.random() * TERRAIN_LABELS.length)];
+    const timeMin = Math.max(1, Math.round((distanceM / 1000 / 28) * 60));
+    const terrainPenalty = terrain === "BERLUMPUR" ? 1.35 : terrain === "BERBATU" ? 1.15 : 1;
+    const score = distanceM * (1 + risk / 100) * terrainPenalty;
+    return {
+      id: i,
+      full,
+      revealed: [],
+      color: CANDIDATE_PALETTE[i % CANDIDATE_PALETTE.length],
+      distanceM,
+      timeMin,
+      risk,
+      terrain,
+      score,
+      dimmed: false,
+      isBest: false,
+    };
+  });
+}
+
+/**
+ * Renders inside `<MapContainer>` (needs `useMap()` for the epic zoom
+ * out/in). Runs once on mount — the caller forces a fresh run by remounting
+ * with a new `key`, which also cancels any in-flight run via the effect
+ * cleanup below.
+ */
+function RouteSearchSequence({
+  destination,
+  userPos,
+  onPhase,
+  onScenarioTick,
+  onResolved,
+}: {
+  destination: EventMarker;
+  userPos: [number, number];
+  onPhase: (phase: SearchPhase, label: string, params: SearchParams | null, progress: number) => void;
+  onScenarioTick: (entry: { label: string; result: string }) => void;
+  onResolved: (route: [number, number][]) => void;
+}) {
+  const map = useMap();
+  const [candidates, setCandidates] = useState<RouteCandidate[]>([]);
+  const [compareIndex, setCompareIndex] = useState(-1);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function run() {
+      // 1. Zoom OUT to frame the whole search area — the "scanning" beat.
+      onPhase("scanning", "MEMINDAI AREA PENCARIAN...", null, 0);
+      const bounds = L.latLngBounds([userPos, destination.pos]).pad(0.7);
+      map.flyToBounds(bounds, { duration: 1, easeLinearity: 0.2 });
+      await wait(950);
+      if (cancelled) return;
+
+      // 2. Generate every candidate at once, kick off the real OSRM fetch in
+      // parallel, and let all candidates fill in together (staggered, like a
+      // wave) rather than one at a time.
+      onPhase("generating", `MEMBANGUN ${CANDIDATE_COUNT} KEMUNGKINAN JALUR...`, null, 0.1);
+      const initial = buildCandidates(userPos, destination.pos);
+      setCandidates(initial);
+      const realRoutePromise = fetchRoadRoute(userPos, destination.pos).then(
+        (r) => r ?? buildFallbackRoute(userPos, destination.pos),
+      );
+
+      await Promise.all(
+        initial.map(
+          (c, i) =>
+            new Promise<void>((resolve) => {
+              (async () => {
+                await wait(i * 65);
+                if (cancelled) return resolve();
+                await animateRouteReveal(
+                  c.full,
+                  750,
+                  (partial) => setCandidates((prev) => prev.map((p) => (p.id === c.id ? { ...p, revealed: partial } : p))),
+                  () => cancelled,
+                );
+                resolve();
+              })();
+            }),
+        ),
+      );
+      if (cancelled) return;
+
+      // 3. Sweep-compare every candidate, sort-visualizer style — track a
+      // running "best so far," flash its parameters into the HUD, and dim
+      // whichever one loses the comparison.
+      let bestSoFar = initial[0];
+      setCandidates((prev) => prev.map((p) => ({ ...p, isBest: p.id === bestSoFar.id })));
+      for (let i = 0; i < initial.length; i++) {
+        if (cancelled) return;
+        const cand = initial[i];
+        setCompareIndex(i);
+        onPhase(
+          "evaluating",
+          `MEMBANDINGKAN JALUR ${i + 1}/${initial.length}...`,
+          { distanceKm: cand.distanceM / 1000, timeMin: cand.timeMin, risk: cand.risk, terrain: cand.terrain },
+          0.2 + (i / initial.length) * 0.6,
+        );
+        await wait(230);
+        if (cancelled) return;
+        if (cand.score < bestSoFar.score) bestSoFar = cand;
+        const winnerId = bestSoFar.id;
+        setCandidates((prev) =>
+          prev.map((p) => (p.id === cand.id ? { ...p, dimmed: p.id !== winnerId, isBest: p.id === winnerId } : p)),
+        );
+      }
+      if (cancelled) return;
+      setCompareIndex(-1);
+      const winner = bestSoFar;
+      setCandidates((prev) => prev.map((p) => ({ ...p, dimmed: p.id !== winner.id, isBest: p.id === winner.id })));
+
+      // 4. Epic push-in on the winner.
+      onPhase(
+        "winner",
+        "JALUR TERBAIK DITEMUKAN",
+        { distanceKm: winner.distanceM / 1000, timeMin: winner.timeMin, risk: winner.risk, terrain: winner.terrain },
+        0.9,
+      );
+      map.flyToBounds(L.latLngBounds(winner.full).pad(0.3), { duration: 1.1, maxZoom: 17 });
+      await wait(1000);
+      if (cancelled) return;
+
+      // 5. Contingency sweep — every likely thing that could go wrong on
+      // the way gets a quick simulated check, so the crew sees it's covered
+      // before moving, not just handed a line on a map.
+      onPhase("contingency", "MENYIMULASIKAN SKENARIO DARURAT...", null, 0.95);
+      for (const scenario of SCENARIOS) {
+        if (cancelled) return;
+        await wait(260);
+        if (cancelled) return;
+        onScenarioTick(scenario);
+      }
+      await wait(300);
+      if (cancelled) return;
+
+      // 6. Swap the winning candidate for the real, road-snapped geometry.
+      const real = await realRoutePromise;
+      if (cancelled) return;
+      onResolved(real);
+    }
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <>
+      {candidates.map((c, idx) => (
+        <Polyline
+          key={c.id}
+          positions={c.revealed}
+          pathOptions={{
+            color: c.color,
+            weight: c.isBest ? 5 : idx === compareIndex ? 4 : 2,
+            opacity: c.dimmed ? 0.08 : c.isBest ? 0.95 : idx === compareIndex ? 0.9 : 0.5,
+            dashArray: c.isBest ? undefined : "4 7",
+          }}
+        />
+      ))}
+    </>
+  );
+}
 
 // ─── Route Options ───────────────────────────────────────────────────────────
 
@@ -145,10 +400,7 @@ function RouteSheet({
   onClose: () => void;
   onSelectRoute: (route: RouteOption) => void;
 }) {
-  const distKm = Math.sqrt(
-    Math.pow((event.pos[0] - userPos[0]) * 111, 2) +
-    Math.pow((event.pos[1] - userPos[1]) * 111, 2)
-  );
+  const distKm = metersBetween(userPos, event.pos) / 1000;
   const options = buildRouteOptions(event, distKm);
   const c = DANGER_COLORS[event.danger];
 
@@ -356,6 +608,48 @@ function MapControls({ userPos }: { userPos: [number, number] | null }) {
   );
 }
 
+// ─── Intro Cinematic ───────────────────────────────────────────────────────
+
+/**
+ * Runs once, the first time a real GPS fix lands — always establishes the
+ * crew's actual starting point first (zoom out to orient, then a smooth
+ * push-in), instead of the map just silently appearing already zoomed in on
+ * a coordinate with no context for where that even is.
+ */
+function IntroSequence({ startPos }: { startPos: [number, number] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      map.setView(startPos, 12, { animate: false });
+      await wait(500);
+      if (cancelled) return;
+      map.flyTo(startPos, 16, { duration: 1.6, easeLinearity: 0.15 });
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return null;
+}
+
+// ─── Live Follow ───────────────────────────────────────────────────────────
+
+/** While actively navigating, keeps the camera gently centered on the crew's live GPS fix as it updates — so the dot moving is something you can actually see happening, not something you have to go look for. */
+function LiveFollow({ pos, active }: { pos: [number, number]; active: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!active) return;
+    map.panTo(pos, { animate: true, duration: 0.8, easeLinearity: 0.25 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos[0], pos[1], active]);
+  return null;
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────
 
 export function PetaTaktis() {
@@ -363,10 +657,33 @@ export function PetaTaktis() {
   const [selectedEvent, setSelectedEvent] = useState<EventMarker | null>(null);
   const [showRouteSheet, setShowRouteSheet] = useState(false);
   const [activeRoute, setActiveRoute] = useState<RouteOption | null>(null);
+  const [routeLine, setRouteLine] = useState<[number, number][]>([]);
+  // Epic route-search sequence state — see RouteSearchSequence above.
+  // `runId` is bumped per pick and used as a React `key` so each pick fully
+  // remounts the sequence (fresh candidates, old one's effect cleanup cancels
+  // whatever was still in flight) instead of reusing stale state.
+  const [searching, setSearching] = useState(false);
+  const [runId, setRunId] = useState(0);
+  const [searchLabel, setSearchLabel] = useState("");
+  const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
+  const [searchProgress, setSearchProgress] = useState(0);
+  const [scenarioLog, setScenarioLog] = useState<{ label: string; result: string }[]>([]);
+  const { heading, available: headingAvailable } = useDeviceHeading();
 
+  // Live position — reflects every GPS fix, moves as the crew actually moves.
   const userPos: [number, number] = coords
     ? [coords.lat, coords.lon]
     : [-6.1818, 106.8223];
+
+  // Starting point — captured once, from the first real fix, and never
+  // moves again. Hazard positions below are anchored to this (not the live
+  // position), so they stay put on the map instead of drifting as the crew
+  // walks around; it's also what the intro cinematic and the "start" pin use.
+  const [startPos, setStartPos] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    if (coords && !startPos) setStartPos([coords.lat, coords.lon]);
+  }, [coords, startPos]);
+  const anchorPos = startPos ?? userPos;
 
   const EVENTS: EventMarker[] = [
     {
@@ -375,7 +692,7 @@ export function PetaTaktis() {
       type: "KEBAKARAN",
       danger: "KRITIS",
       label: "KODE MERAH: API",
-      pos: [userPos[0] + 0.003, userPos[1] - 0.004],
+      pos: [anchorPos[0] + 0.003, anchorPos[1] - 0.004],
       distance: "0.8 KM",
       affected: 37,
     },
@@ -385,7 +702,7 @@ export function PetaTaktis() {
       type: "BENCANA",
       danger: "TINGGI",
       label: "JALUR PUTUS",
-      pos: [userPos[0] - 0.005, userPos[1] + 0.006],
+      pos: [anchorPos[0] - 0.005, anchorPos[1] + 0.006],
       distance: "1.4 KM",
       affected: 12,
     },
@@ -395,7 +712,7 @@ export function PetaTaktis() {
       type: "MEDIS",
       danger: "TINGGI",
       label: "DARURAT MEDIS",
-      pos: [userPos[0] - 0.002, userPos[1] - 0.003],
+      pos: [anchorPos[0] - 0.002, anchorPos[1] - 0.003],
       distance: "0.5 KM",
       affected: 3,
     },
@@ -405,7 +722,7 @@ export function PetaTaktis() {
       type: "KEAMANAN",
       danger: "SEDANG",
       label: "POSKO AMAN",
-      pos: [userPos[0] + 0.001, userPos[1] + 0.002],
+      pos: [anchorPos[0] + 0.001, anchorPos[1] + 0.002],
       distance: "0.3 KM",
       affected: 80,
     },
@@ -423,13 +740,31 @@ export function PetaTaktis() {
   };
 
   const handleNavigate = () => {
+    // iOS requires DeviceOrientationEvent.requestPermission() to be called
+    // from a real tap — this is the first tap in the navigate flow, so it's
+    // the right place. No-ops safely wherever the API doesn't exist at all.
+    void startHeadingWatch();
     setShowRouteSheet(true);
   };
 
   const handleSelectRoute = (route: RouteOption) => {
+    if (!selectedEvent) return;
     setActiveRoute(route);
     setShowRouteSheet(false);
-    // In production: trigger OSRM routing & draw polyline
+    setRouteLine([]);
+    setSearchLabel("MEMINDAI AREA PENCARIAN...");
+    setSearchParams(null);
+    setSearchProgress(0);
+    setScenarioLog([]);
+    setSearching(true);
+    setRunId((r) => r + 1);
+  };
+
+  const handleClearRoute = () => {
+    setSearching(false);
+    setActiveRoute(null);
+    setRouteLine([]);
+    setScenarioLog([]);
   };
 
   const activeCount = EVENTS.filter((e) => e.danger === "KRITIS").length;
@@ -464,10 +799,72 @@ export function PetaTaktis() {
         </div>
       </header>
 
-      {/* Active route banner */}
-      <AnimatePresence>
-        {activeRoute && (
+      {/* Route search HUD (while searching) / final nav banner (once resolved) */}
+      <AnimatePresence mode="wait">
+        {searching ? (
           <motion.div
+            key="searching"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden bg-[#0a0a0a] border-b border-[#66df75]/40"
+          >
+            <div className="px-4 py-2 flex items-center gap-2">
+              <Loader2 size={12} className="animate-spin text-[#66df75] shrink-0" />
+              <span className="font-mono text-[10px] font-bold text-[#66df75] uppercase tracking-wide truncate">
+                {searchLabel}
+              </span>
+            </div>
+
+            {searchParams && (
+              <div className="px-4 pb-2 grid grid-cols-4 gap-2 font-mono text-[9px]">
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[#555]">JARAK</span>
+                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.distanceKm.toFixed(2)} KM</span>
+                </div>
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[#555]">WAKTU</span>
+                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.timeMin} MNT</span>
+                </div>
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[#555]">RISIKO</span>
+                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.risk}%</span>
+                </div>
+                <div className="flex flex-col gap-0.5 min-w-0">
+                  <span className="text-[#555]">MEDAN</span>
+                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.terrain}</span>
+                </div>
+              </div>
+            )}
+
+            {scenarioLog.length > 0 && (
+              <div className="px-4 pb-2 flex flex-col gap-1 font-mono text-[9px] max-h-24 overflow-y-auto">
+                {scenarioLog.map((s, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, x: -8 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Check size={10} className="text-[#66df75] shrink-0" />
+                    <span className="text-[#666] truncate">{s.label}</span>
+                    <span className="text-[#66df75] ml-auto shrink-0 truncate">{s.result}</span>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+
+            <div className="h-[3px] bg-[#1a1a1a]">
+              <motion.div
+                className="h-full bg-[#66df75]"
+                animate={{ width: `${searchProgress * 100}%` }}
+                transition={{ ease: "linear", duration: 0.25 }}
+              />
+            </div>
+          </motion.div>
+        ) : activeRoute ? (
+          <motion.div
+            key="active"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -487,14 +884,14 @@ export function PetaTaktis() {
                 </span>
               </div>
               <button
-                onClick={() => setActiveRoute(null)}
+                onClick={handleClearRoute}
                 className="text-[#555] hover:text-[#e1bec2]"
               >
                 <X size={12} />
               </button>
             </div>
           </motion.div>
-        )}
+        ) : null}
       </AnimatePresence>
 
       {/* Map */}
@@ -511,31 +908,92 @@ export function PetaTaktis() {
         />
 
         {coords ? (
-          <MapContainer
-            center={userPos}
-            zoom={15}
-            zoomControl={false}
-            style={{ height: "100%", width: "100%", zIndex: 1 }}
+          // Oversized (150%) and re-centered so that when the inner div is
+          // CSS-rotated to match device heading, its corners still fully
+          // cover the (smaller, overflow-hidden) viewport — a plain 100%
+          // box would expose blank triangles at the corners on rotation.
+          // `transform` only applies once a real heading is available;
+          // otherwise this is just an inert wrapper around a north-up map.
+          <div
+            className="absolute"
+            style={
+              {
+                top: "-25%",
+                left: "-25%",
+                width: "150%",
+                height: "150%",
+                "--map-heading": `${heading ?? 0}deg`,
+                "--heading-available": headingAvailable ? 1 : 0,
+                transform: headingAvailable && heading !== null ? "rotate(calc(-1 * var(--map-heading)))" : "none",
+                transition: "transform 0.35s linear",
+              } as any
+            }
           >
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              subdomains="abcd"
-            />
-
-            {/* User location */}
-            <Marker position={userPos} icon={SELF_ICON} />
-
-            {/* Event markers */}
-            {EVENTS.map((event) => (
-              <EventMapMarker
-                key={event.id}
-                event={event}
-                onSelect={handleSelectEvent}
+            <MapContainer
+              center={userPos}
+              zoom={15}
+              zoomControl={false}
+              style={{ height: "100%", width: "100%", zIndex: 1 }}
+            >
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
               />
-            ))}
 
-            <MapControls userPos={userPos} />
-          </MapContainer>
+              {/* Establishing shot — always opens on the crew's real
+                  starting point before anything else happens */}
+              {startPos && <IntroSequence startPos={startPos} />}
+
+              {/* Fixed pin at the point the crew started from */}
+              {startPos && <Marker position={startPos} icon={START_ICON} />}
+
+              {/* Live position — actually moves with GPS fixes */}
+              <Marker position={userPos} icon={SELF_ICON} />
+              <LiveFollow pos={userPos} active={!!activeRoute && !searching} />
+
+              {/* Epic route-search cinematic — every candidate filling in,
+                  sweep-compared, winner zoomed into, then swapped for the
+                  real OSRM geometry (see RouteSearchSequence above) */}
+              {searching && selectedEvent && (
+                <RouteSearchSequence
+                  key={runId}
+                  destination={selectedEvent}
+                  userPos={startPos ?? userPos}
+                  onPhase={(_phase, label, params, progress) => {
+                    setSearchLabel(label);
+                    setSearchParams(params);
+                    setSearchProgress(progress);
+                  }}
+                  onScenarioTick={(entry) => setScenarioLog((prev) => [...prev, entry])}
+                  onResolved={(route) => {
+                    setRouteLine(route);
+                    setSearching(false);
+                  }}
+                />
+              )}
+
+              {/* Active route, road-snapped via OSRM (src/lib/routing.ts), same
+                  engine radar uses to dispatch units — with the bezier-curve
+                  fallback if OSRM's unreachable */}
+              {activeRoute && !searching && routeLine.length > 1 && (
+                <Polyline
+                  positions={routeLine}
+                  pathOptions={{ color: activeRoute.color, weight: 4, opacity: 0.85 }}
+                />
+              )}
+
+              {/* Event markers */}
+              {EVENTS.map((event) => (
+                <EventMapMarker
+                  key={event.id}
+                  event={event}
+                  onSelect={handleSelectEvent}
+                />
+              ))}
+
+              <MapControls userPos={userPos} />
+            </MapContainer>
+          </div>
         ) : (
           <div className="absolute inset-0 z-[1] flex items-center justify-center bg-[#0a0a0a]">
             <span className="font-mono text-xs text-[#666] uppercase tracking-[2px]">
@@ -546,6 +1004,12 @@ export function PetaTaktis() {
 
         {/* Coord overlay */}
         <div className="absolute top-3 left-3 flex flex-col gap-0.5 z-[1000]">
+          {coords && (
+            <div className="px-1.5 py-0.5 bg-[#131313]/90 border border-[#66df75]/40 font-mono text-[9px] text-[#66df75] tracking-wider flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-[#66df75] animate-pulse" />
+              LIVE
+            </div>
+          )}
           <div className="px-1.5 py-0.5 bg-[#131313]/90 border border-[#333] font-mono text-[10px] text-[#555] tracking-wider">
             {coords ? `LAT: ${coords.lat.toFixed(5)}°` : "LAT: —"}
           </div>
@@ -569,9 +1033,12 @@ export function PetaTaktis() {
         </div>
       </main>
 
-      {/* Event popup (above nav bar) */}
+      {/* Event popup (above nav bar) — hidden once a route is being searched
+          or is active, so the epic search cinematic and the resulting
+          navigation view get the full map instead of this card lingering
+          over a third of the screen */}
       <AnimatePresence>
-        {selectedEvent && !showRouteSheet && (
+        {selectedEvent && !showRouteSheet && !searching && !activeRoute && (
           <EventPopup
             event={selectedEvent}
             userPos={userPos}

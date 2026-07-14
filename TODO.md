@@ -211,6 +211,121 @@ that didn't refer to the same incidents/people. Fixed as part of building
 task assignment below, since "assign a ranger to a hazard" doesn't make
 sense if the two views disagree on what a hazard even is.
 
+## Personel map routing now shares radar's real routing engine — built
+
+`PetaTaktis.tsx` (personel's tactical map) used to fake navigation entirely:
+distance was a hand-rolled flat-earth calc duplicating `metersBetween`, the
+three route options (fastest/moderate/safest) were arbitrary time/distance
+multipliers with no real geometry, and picking one just set UI state — no
+polyline was ever drawn (the comment literally said `// In production:
+trigger OSRM routing & draw polyline`). `src/lib/routing.ts` was already a
+plain shared module (no radar-only state), just never imported here.
+
+Now personel imports the same functions radar uses to dispatch units —
+`metersBetween`, `fetchRoadRoute`, `buildFallbackRoute`, `animateRouteReveal`
+— so both roles run on one routing engine instead of two divergent ones.
+Selecting a route option fetches a real OSRM road-snapped path from the
+ranger's GPS position to the incident (falling back to the bezier-curve
+approximation if OSRM's unreachable), draws it progressively via
+`animateRouteReveal`, and renders it as a `<Polyline>`. A `routeToken` ref
+guards against a stale reveal (from a route the operator already abandoned)
+overwriting a newer one if routes are switched quickly.
+
+Still simulated/left for later: the three route *options* shown before
+selection remain synthetic multipliers on straight-line distance rather than
+three actually-distinct OSRM routes (OSRM's free demo endpoint doesn't do
+alternatives cleanly) — only the one actually picked gets a real path.
+
+**"Route search" cinematic — purely a visualization, not a routing
+algorithm.** The real OSRM fetch is usually sub-second, which read as an
+instant snap with nothing communicated. Picking a route option in
+`PetaTaktis.tsx` now runs a multi-beat sequence, built to read as "the
+algorithm is doing real, fast, thorough work" on a screen small enough that
+it also has to double as reassurance for the crew member about to move:
+
+1. **Scan** — camera zooms *out* (`map.flyToBounds`) to frame the whole area
+   between the ranger and the incident.
+2. **Generate** — `CANDIDATE_COUNT` (8) distinct candidate paths spread across
+   a `bend` range (see `buildFallbackRoute`'s new `bend` param in
+   `src/lib/routing.ts`) all fill in at once, staggered like a wave via
+   `animateRouteReveal`, each colored differently and each carrying invented
+   distance/time/risk/terrain stats (`buildCandidates`). The real
+   `fetchRoadRoute` call fires in parallel here, not awaited yet.
+3. **Evaluate** — a sort-visualizer-style sweep steps through every
+   candidate one at a time, flashing its stats into the HUD and dimming it
+   unless it's the new "best so far" (lowest fake weighted score).
+4. **Winner** — camera pushes *in* tight on the winning candidate's bounds.
+5. **Contingency** — a fixed checklist of field scenarios (road blocked,
+   landslide, GPS lost → offline/Bluetooth fallback, new danger zone, bad
+   weather) ticks past with a simulated "covered" result each, so the crew
+   sees likely failure modes acknowledged before they move — this part is
+   pure UI, nothing here actually reads live GPS/hazard state yet.
+6. **Resolve** — the winning candidate is swapped for the real OSRM/fallback
+   geometry that finished fetching back in step 2, and the normal solid
+   route line + "NAVIGASI AKTIF" banner take over.
+
+None of the candidate scoring, terrain/risk labels, or scenario outcomes are
+real — only the final destination and the swapped-in real route geometry
+are. Documented here so this doesn't get mistaken for actual routing logic
+later. The whole component (`RouteSearchSequence` in `PetaTaktis.tsx`) is
+keyed by `runId` so picking a new route mid-sequence fully remounts and
+cancels the old one via its effect cleanup, same cancellation pattern as
+`FlareSequence` on the radar side.
+
+## Personel map: starting point, live tracking, heading rotation — built
+
+Several related fixes/additions to `PetaTaktis.tsx`, all in service of "always
+know where the crew started, where they are now, and (if the device can tell
+us) which way they're facing":
+
+- **Starting point vs. live position, split.** Previously every hazard marker
+  was positioned as an offset from the *live* GPS position, so hazards would
+  visibly drift around the map as the ranger walked — clearly wrong, hazards
+  are fixed real-world locations. Now `startPos` is captured once, from the
+  first real GPS fix, and never changes; hazard positions (`EVENTS`) and the
+  route-search cinematic's origin are anchored to `startPos`. The live
+  position (`userPos`, from `useDeviceLocation()`) still updates on every GPS
+  fix as before, driving only the moving `SELF_ICON` dot — a fixed blue flag
+  (`START_ICON`) now separately marks where the crew actually started.
+- **Intro cinematic.** The very first time a GPS fix lands, `IntroSequence`
+  (mounted inside `<MapContainer>` for `useMap()` access) sets the view wide
+  (zoom 12) then flies in to `startPos` at zoom 16 over 1.6s — an establishing
+  shot, so the map never just silently appears already zoomed into a
+  coordinate with no context.
+- **Live-follow during navigation.** `LiveFollow` pans the camera to the live
+  `userPos` (throttled to actual GPS fix cadence, not polled) whenever
+  `activeRoute` is set and the search isn't still running — so once
+  navigating, the crew's dot moving is something visibly tracked by the
+  camera, not something you have to go hunt for on the map.
+- **Device-heading map rotation — best-effort, untested on real hardware.**
+  There is no dedicated Tauri compass/magnetometer plugin (see AGENTS.md's
+  plugin table — only `tauri-plugin-os` exists, for platform/OS info, not
+  sensors), so `src/store/heading.ts` feature-detects the standard web
+  `DeviceOrientationEvent` API instead — it may or may not fire depending on
+  what the underlying webview exposes (WKWebView on iOS/macOS often does;
+  WebView2/WebKitGTK on Windows/Linux typically don't). `startHeadingWatch()`
+  is called from the first "Navigasi" tap specifically because iOS 13+
+  requires `requestPermission()` to originate from a real user gesture.
+  When a heading *is* available, the map's container is CSS-rotated
+  (`rotate(calc(-1 * var(--map-heading)))`) so "up on screen" tracks the
+  direction the phone is facing, nav-app style; every marker counter-rotates
+  by the same CSS var (inherited, so no icon HTML needs regenerating per
+  heading tick) to stay upright and legible. The rotated container is
+  oversized to 150%/centered so corners don't expose blank map outside the
+  viewport when rotated. When heading is unavailable (the expected case on
+  most desktop/Windows/Linux webviews), none of this activates — it's a
+  plain north-up map with just the zoom in/out cinematic, exactly the
+  specified fallback. **Not verified against a real device/sensor** — no
+  hardware available in this environment to test against; verify on an
+  actual phone build before relying on it.
+- **Event detail card no longer lingers over the map after navigating.** Bug:
+  `EventPopup` was shown whenever `selectedEvent && !showRouteSheet` — which
+  became true again the instant a route was picked (since `showRouteSheet`
+  resets to `false`), leaving the bottom detail card + "NAVIGASI" button
+  sitting over roughly a third of the screen during the search cinematic and
+  the subsequent navigation. Now also gated on `!searching && !activeRoute`,
+  so picking a route collapses that card and the full map is visible.
+
 ## Realtime task-based ranger tracking + smooth glide — built
 
 "Budi takes the crash task" now works for any hazard, not just the FLARE
