@@ -272,6 +272,60 @@ keyed by `runId` so picking a new route mid-sequence fully remounts and
 cancels the old one via its effect cleanup, same cancellation pattern as
 `FlareSequence` on the radar side.
 
+## Personel map: starting point, live tracking, heading rotation — built
+
+Several related fixes/additions to `PetaTaktis.tsx`, all in service of "always
+know where the crew started, where they are now, and (if the device can tell
+us) which way they're facing":
+
+- **Starting point vs. live position, split.** Previously every hazard marker
+  was positioned as an offset from the *live* GPS position, so hazards would
+  visibly drift around the map as the ranger walked — clearly wrong, hazards
+  are fixed real-world locations. Now `startPos` is captured once, from the
+  first real GPS fix, and never changes; hazard positions (`EVENTS`) and the
+  route-search cinematic's origin are anchored to `startPos`. The live
+  position (`userPos`, from `useDeviceLocation()`) still updates on every GPS
+  fix as before, driving only the moving `SELF_ICON` dot — a fixed blue flag
+  (`START_ICON`) now separately marks where the crew actually started.
+- **Intro cinematic.** The very first time a GPS fix lands, `IntroSequence`
+  (mounted inside `<MapContainer>` for `useMap()` access) sets the view wide
+  (zoom 12) then flies in to `startPos` at zoom 16 over 1.6s — an establishing
+  shot, so the map never just silently appears already zoomed into a
+  coordinate with no context.
+- **Live-follow during navigation.** `LiveFollow` pans the camera to the live
+  `userPos` (throttled to actual GPS fix cadence, not polled) whenever
+  `activeRoute` is set and the search isn't still running — so once
+  navigating, the crew's dot moving is something visibly tracked by the
+  camera, not something you have to go hunt for on the map.
+- **Device-heading map rotation — best-effort, untested on real hardware.**
+  There is no dedicated Tauri compass/magnetometer plugin (see AGENTS.md's
+  plugin table — only `tauri-plugin-os` exists, for platform/OS info, not
+  sensors), so `src/store/heading.ts` feature-detects the standard web
+  `DeviceOrientationEvent` API instead — it may or may not fire depending on
+  what the underlying webview exposes (WKWebView on iOS/macOS often does;
+  WebView2/WebKitGTK on Windows/Linux typically don't). `startHeadingWatch()`
+  is called from the first "Navigasi" tap specifically because iOS 13+
+  requires `requestPermission()` to originate from a real user gesture.
+  When a heading *is* available, the map's container is CSS-rotated
+  (`rotate(calc(-1 * var(--map-heading)))`) so "up on screen" tracks the
+  direction the phone is facing, nav-app style; every marker counter-rotates
+  by the same CSS var (inherited, so no icon HTML needs regenerating per
+  heading tick) to stay upright and legible. The rotated container is
+  oversized to 150%/centered so corners don't expose blank map outside the
+  viewport when rotated. When heading is unavailable (the expected case on
+  most desktop/Windows/Linux webviews), none of this activates — it's a
+  plain north-up map with just the zoom in/out cinematic, exactly the
+  specified fallback. **Not verified against a real device/sensor** — no
+  hardware available in this environment to test against; verify on an
+  actual phone build before relying on it.
+- **Event detail card no longer lingers over the map after navigating.** Bug:
+  `EventPopup` was shown whenever `selectedEvent && !showRouteSheet` — which
+  became true again the instant a route was picked (since `showRouteSheet`
+  resets to `false`), leaving the bottom detail card + "NAVIGASI" button
+  sitting over roughly a third of the screen during the search cinematic and
+  the subsequent navigation. Now also gated on `!searching && !activeRoute`,
+  so picking a route collapses that card and the full map is visible.
+
 ## Realtime task-based ranger tracking + smooth glide — built
 
 "Budi takes the crash task" now works for any hazard, not just the FLARE
