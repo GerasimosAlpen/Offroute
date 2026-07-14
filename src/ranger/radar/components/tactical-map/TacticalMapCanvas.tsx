@@ -613,8 +613,15 @@ function FlareSequence({
       if (cancelled) return;
 
       // 5b. Radar can't see the victim directly — the only realtime signal
-      // is whatever the dispatched personel's own phone can pick up (see
-      // TODO.md for the offline-beacon approach this is standing in for).
+      // is whatever the dispatched personel's own phone can pick up. This
+      // stays simulated on purpose: see TODO.md's "Bluetooth — two tiers,
+      // build tier 1 first" — real victim-as-beacon detection (Tier 2) needs
+      // a native mobile peripheral/GATT-server role (Swift CoreBluetooth,
+      // Kotlin BLE) that doesn't exist in Tauri, and iOS enforces a hard
+      // OS-level restriction on background BLE advertising that no framework
+      // can bypass. The real Tier 1 BLE relay (src-tauri/src/commands/
+      // bluetooth.rs, src/store/bluetooth.ts) only covers desktop
+      // central/client — it doesn't change what's simulated here.
       // So radar asks, personel answers with whatever their hardware found.
       log({
         sender: "PUSAT",

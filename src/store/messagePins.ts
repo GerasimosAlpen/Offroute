@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { messagesApi, type CreateMessagePinDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
 
 export interface MessagePin {
   id: string;
@@ -54,10 +55,13 @@ export const useMessagePinsStore = create<MessagePinsState>((set, get) => {
       if (get().loaded) return;
       try {
         const remote = await messagesApi.pins();
-        set({ pins: remote.map(apiPinToLocal), loaded: true });
+        const pins = remote.map(apiPinToLocal);
+        set({ pins, loaded: true });
+        void cacheSet("messagePins", pins);
       } catch (err) {
         console.warn("[messagePins] Failed to load from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<MessagePin>("messagePins");
+        set({ pins: cached, loaded: true });
       }
     },
 

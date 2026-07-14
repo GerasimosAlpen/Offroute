@@ -1,11 +1,12 @@
 import { Module } from "@nestjs/common";
 import { TasksController } from "./tasks.controller";
 import { TasksService } from "./tasks.service";
-import { EventsGateway } from "../gateway/events.gateway";
+import { GatewayModule } from "../gateway/gateway.module";
 
 @Module({
+  imports: [GatewayModule],
   controllers: [TasksController],
-  providers: [TasksService, EventsGateway],
+  providers: [TasksService],
   exports: [TasksService],
 })
 export class TasksModule {}

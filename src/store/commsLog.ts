@@ -1,6 +1,7 @@
 import { create } from "zustand";
-import { commsApi } from "@/lib/api";
+import { commsApi, type CreateCommsEntryDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet, enqueueMutation, registerReplayHandler } from "@/lib/offlineCache";
 
 export interface CommEntry {
   time: string;
@@ -23,6 +24,17 @@ function formatNow() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+// Entries this client just appended optimistically, waiting to be matched
+// against their own echo off the socket — sender+lead+body rather than an
+// exact time-string match, since the backend computes its own `time`
+// server-side (ignoring whatever the client sent), so a client's optimistic
+// timestamp and the broadcast echo's timestamp won't line up exactly.
+const pendingOwnAppends: { sender: string; lead: string; body: string }[] = [];
+
+registerReplayHandler("commsApi.append", async (payload) => {
+  await commsApi.append(payload as CreateCommsEntryDto);
+});
+
 /**
  * Global comms log — loads history from API on first call, then stays live
  * via the comms-message Socket.IO event.
@@ -32,10 +44,14 @@ export const useCommsLogStore = create<CommsLogState>((set, get) => {
   socket.on("comms-message", (entry: CommEntry) => {
     if (!entry || typeof entry.body !== "string") return; // malformed payload, ignore rather than throw
     // De-dupe: don't re-add entries that came back as echoes of our own POST
-    const exists = get().entries.some(
-      (e) => e.time === entry.time && e.sender === entry.sender && e.body === entry.body,
+    const pendingIdx = pendingOwnAppends.findIndex(
+      (p) => p.sender === entry.sender && p.lead === entry.lead && p.body === entry.body,
     );
-    if (!exists) set((s) => ({ entries: [...s.entries, entry] }));
+    if (pendingIdx !== -1) {
+      pendingOwnAppends.splice(pendingIdx, 1);
+      return; // already shown optimistically
+    }
+    set((s) => ({ entries: [...s.entries, entry] }));
   });
 
   return {
@@ -47,8 +63,16 @@ export const useCommsLogStore = create<CommsLogState>((set, get) => {
       try {
         const history: CommEntry[] = await commsApi.history();
         set({ entries: history, loaded: true });
+        // CommEntry has no `id` field of its own — synthesize one from
+        // time+index just for the cache key, harmless extra property on read.
+        void cacheSet("commsLog", history.map((e, i) => ({ id: `${e.time}-${i}`, ...e })));
       } catch (err) {
         console.warn("[commsLog] Failed to load history from API:", err);
+        const cached = await cacheGetAll<CommEntry>("commsLog");
+        if (cached.length > 0) {
+          set({ entries: cached, loaded: true });
+          return;
+        }
         // Fallback to static initial log so UI isn't empty
         set({
           loaded: true,
@@ -62,7 +86,14 @@ export const useCommsLogStore = create<CommsLogState>((set, get) => {
       }
     },
 
-    append: (entry) =>
-      set((s) => ({ entries: [...s.entries, { ...entry, time: formatNow() }] })),
+    append: (entry) => {
+      const withTime = { ...entry, time: formatNow() };
+      set((s) => ({ entries: [...s.entries, withTime] }));
+      pendingOwnAppends.push({ sender: entry.sender, lead: entry.lead, body: entry.body });
+      commsApi.append(withTime).catch((err) => {
+        console.warn("[commsLog] Failed to persist entry to backend:", err);
+        void enqueueMutation({ domain: "commsLog", method: "commsApi.append", payload: withTime });
+      });
+    },
   };
 });

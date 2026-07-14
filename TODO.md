@@ -97,39 +97,21 @@ now).
   guards against a null/malformed payload before touching its fields, so a
   bad broadcast logs a warning instead of throwing inside the listener.
 
-**Backend gaps found — need the collaborator, not fixable from the frontend
-alone:**
-- **No `POST /comms` route.** `_server/src/comms/comms.service.ts` has a
-  fully-working `append()` method (persists a `CommsEntry`, emits
-  `comms-message`) but `comms.controller.ts` only exposes `GET /comms/
-  history` — nothing ever calls `append()`. Result: the frontend's
-  `comms-message` listener (`src/store/commsLog.ts`) is live code waiting on
-  an event that can never fire. Every comms-log line the radar UI shows
-  today (task acceptance, arrival, evac request/accept/reject) is generated
-  by `useCommsLogStore.getState().append()` and stays purely local to that
-  browser tab — it never reaches the backend or other clients. Needs a
-  `POST /comms` (or similar) route wired to the existing `append()` before
-  this can be made real.
-- **`LaporIncident.tsx` (radar's incident-report page) is still a pure UI
-  mock** — hardcoded history list, no state wired up, and its "KIRIM
-  LAPORAN" submit button has no handler at all. Beyond just adding a submit
-  handler: this page's own `IncidentType` (`fire | flood | quake | landslide
-  | other`) doesn't match the backend's `HazardKind` enum (`fire | blocked |
-  medical | crash | theft`) — same app, two disconnected incident
-  taxonomies, one of them (`HazardKind`, in `src/lib/hazards.ts`) already
-  used everywhere else and matching the backend exactly. This needs a
-  product decision (which taxonomy wins, or do both need to coexist) before
-  it's wired, not just a mechanical `incidentsApi.create()` call.
-- **`EventsGateway` is provided per-module** (separately in `comms`,
-  `evacuation`, `flare`, `incidents`, `messages`, `tasks` — six providers of
-  the same class, no shared `GatewayModule` exporting one instance).
-  Probably harmless for `.emit()` broadcasting today, but not how Nest
-  gateways are meant to be shared, and `handleConnection`/`handleDisconnect`
-  fire once per module per client. Worth a cleanup pass.
-- **Uncommitted local diff in `_server/prisma/schema.prisma`** plus an
-  untracked `_server/bun.lock` were sitting in the working tree when this
-  audit ran — worth reconciling/committing (or discarding, if stray) before
-  either of you relies on `main` matching what's actually running.
+**Backend gaps found in this pass — all three now fixed, see "Backend
+completion, FLARE stand-down, SQLite cache, Bluetooth Tier 1" below:**
+- ~~No `POST /comms` route~~ — fixed: `CreateCommsEntryDto` +
+  `POST /comms` added, `commsLog.ts`'s `append()` now persists.
+- ~~`LaporIncident.tsx` is a pure UI mock~~ — fixed: switched to the shared
+  `HazardKind`/`HazardSeverity` taxonomy, wired to `POST /incidents`, history
+  panel now reads from `useIncidents()`.
+- ~~`EventsGateway` provided per-module~~ — fixed: consolidated into a
+  shared `GatewayModule`.
+- **Still true, not addressed:** uncommitted local diff in
+  `_server/prisma/schema.prisma` plus an untracked `_server/bun.lock` were
+  sitting in the working tree when the original audit ran — worth
+  reconciling/committing (or discarding, if stray) before either of you
+  relies on `main` matching what's actually running. Left alone since it's
+  not this session's to resolve unilaterally.
 
 **Known limitation, not fixed in this pass:** `src/store/tasks.ts`'s
 `assign()` still looks up hazards/rangers from the static `HAZARDS`/`RANGERS`
@@ -143,6 +125,71 @@ somewhere) wouldn't be dispatchable via "Kirim Unit", since `assign()`'s
 the live `hazards`/`personnel` query results into `assign()` from its call
 site (`HazardStatusPanel.tsx`) instead of importing the static arrays
 directly inside the store.
+
+## Backend completion, FLARE stand-down, SQLite cache, Bluetooth Tier 1 — built (2026-07-14)
+
+Four workstreams, done together per an explicit user request to "finish the
+backend for real," make FLARE emergencies end-able, cache real data offline
+via SQLite, and start on Bluetooth for finding "korban" (victims). Full plan
+lives in the session's plan file; summary here for future reference.
+
+**1. Backend `_server` cleanup** — the three gaps listed above, plus:
+`CreateIncidentDto`-shaped submission from `LaporIncident.tsx` submits
+`offsetLat: 0, offsetLon: 0` ("reported at my own position") — **not a real
+fix** for the underlying issue that `Incident.offsetLat/offsetLon` are
+relative-to-viewer, not absolute coordinates (confirmed via 3 render call
+sites in `TacticalMapCanvas.tsx`). A real fix means migrating to absolute
+lat/lon — bigger, deliberately not done here.
+
+**2. FLARE manual stand-down** — `POST /flare/deactivate` (new,
+`flare.service.ts`'s `deactivate()`, transitions `FlareStatus` to `calm`,
+which existed in the schema but was never written by anything until now).
+`src/store/flare.ts` gained a `deactivate()` action and a 2-minute
+client-side auto-expiry backstop (keyed to `sequence`, so a stood-down or
+superseded FLARE's stale timer can't misfire). New `StandDownButton.tsx` in
+the radar header, next to `StatusBadges`. **Assumption, flag if wrong:** the
+user's two answers ("manual button" + "2 minutes") were reconciled as manual
+being primary, 2-minute timer being a soft backstop, not the main UX.
+
+**3. Real SQLite offline cache** — `tauri-plugin-sql` was registered and
+permissioned but only ever used in a demo notes card; the real app fell back
+to hardcoded static arrays or silently swallowed failures. New
+`src/lib/offlineCache.ts`: two generic tables (`cache_entities`,
+`mutation_queue`), wired write-through/read-fallback into every `loadX()`
+store (`messagePins`, `tasks`, `evacuationPoints`, `evacuationRequests`,
+`commsLog`) plus `useIncidents.ts` (handled specially — it's a TanStack
+Query hook, not a Zustand store, so the cache lives inside `queryFn` instead
+of a `catch` block). Mutation queueing wired at the two call sites that
+needed it most: `commsLog.ts`'s `commsApi.append()` and `tasks.ts`'s
+`tasksApi.assign()`. The previously-dead `useOnlineStatus` hook now actually
+drives `retryQueuedMutations()` in `App.tsx`'s `AppInit`.
+
+**4. Bluetooth Tier 1 (desktop BLE relay)** — real, not simulated:
+`src-tauri/src/commands/bluetooth.rs` (new Rust module, `btleplug` crate)
+adds `ble_start_scan`/`ble_stop_scan`/`ble_list_devices`/`ble_connect`/
+`ble_disconnect`/`ble_send_message` Tauri commands, using the Nordic UART
+Service (NUS) UUID scheme so it's testable against any real NUS-compatible
+peripheral (e.g. a phone in nRF Connect's peripheral mode) rather than
+needing Offroute's own peripheral role to exist. **`cargo check` and
+`cargo build` both pass clean** (verified this session — unlike the
+abandoned native-geolocation attempt, a Rust toolchain was actually
+available here) — but this has **not been tested against real Bluetooth
+hardware**, since none was available in this environment. `src/store/
+bluetooth.ts` + a debug `BluetoothCard.tsx` in the demo playground are the
+only frontend surface so far — no real radar UI integration yet.
+
+**Important limitation, called out explicitly per the plan:** `btleplug` is
+BLE **central/client only** — it can scan and connect to existing
+peripherals, but cannot host a GATT server (peripheral role) on any desktop
+platform. That means **this does not yet let two Offroute instances talk to
+each other** — only to a third-party peripheral. Making Offroute-to-Offroute
+relay work is Phase 2 (not built): needs one side to host a GATT server,
+which only has a mature crate on Linux (`bluer`); macOS/Windows would need
+direct native FFI, comparable in risk to the abandoned geolocation spike.
+Victim-beacon detection ("korban ditemukan") stays fully simulated per
+explicit user decision — see the extended comment in `TacticalMapCanvas.tsx`
+above the victim-signal-exchange log lines, which now names this section and
+the iOS background-BLE restriction directly.
 
 ## BMKG weather — needs an adm4 lookup
 
@@ -220,20 +267,25 @@ Windows (`netsh wlan show interfaces`) and Linux (`/proc/net/wireless`)
 branches, but only the macOS one has actually been run. Verify on real
 Windows/Linux machines before relying on it.
 
-## Bluetooth — two tiers, build tier 1 first
+## Bluetooth — two tiers, tier 1 built (desktop central/client only)
 
 Both tiers sit on top of the Bluetooth research spike already flagged in
 `CLAUDE.md` (no official Tauri Bluetooth plugin exists; needs a custom Rust
 module, e.g. `btleplug`).
 
-**Tier 1 (guaranteed floor, build this first):** plain Bluetooth data/text
-communication between personel↔personel and personel↔radar when internet is
-down — the original README requirement. Both ends have the app open,
-Bluetooth on, exchanging structured messages (status updates, GPS pings,
-short text) over a direct BLE GATT connection or classic Bluetooth serial.
-Normal foreground BLE — doesn't fight iOS's background restrictions the way
-tier 2 would. `btleplug` gives real cross-platform BLE support for this on
-desktop (radar, and personel if it ends up desktop too).
+**Tier 1 — built, 2026-07-14:** `src-tauri/src/commands/bluetooth.rs`
+(`btleplug` crate) + `src/store/bluetooth.ts` + a debug `BluetoothCard.tsx`
+in the demo playground. Speaks Nordic UART Service (NUS) so it's verifiable
+against any real NUS-compatible peripheral without needing Offroute's own
+peripheral role. `cargo check`/`cargo build` both pass clean — **not tested
+against real Bluetooth hardware** (none available in this environment).
+**Important limitation:** `btleplug` is central/client only — it cannot host
+a GATT server, so this does *not* yet let two Offroute instances talk to
+each other, only to a third-party peripheral. No radar UI integration yet
+beyond the demo card, and personel↔radar relay (the original README ask)
+still needs Phase 2 below.
+
+Original plan, still accurate for what's left:
 
 **Tier 2 (stretch goal, layered on top of tier 1, not a prerequisite for
 it):** victim/personel phone-as-beacon when buried/stuck with zero
@@ -273,6 +325,15 @@ Layered approach if tier 2 gets built:
   beacon plugin exists ready to use. It doesn't.
 - **Web Bluetooth is not an option** for tier 2 — central/scanning only,
   never peripheral/advertising, and unavailable in iOS WKWebView regardless.
+- **Desktop-to-desktop relay also needs a peripheral role**, separate from
+  the mobile-beacon problem above — `btleplug`'s central-only nature means
+  two desktop Offroute instances can't talk to each other yet either. Only
+  Linux has a mature Rust crate covering both central *and* peripheral
+  (`bluer`, BlueZ D-Bus bindings); macOS/Windows peripheral hosting needs
+  direct native FFI (CoreBluetooth, WinRT's `GattServiceProvider`) with no
+  ready-made safe crate. Start here (Linux/`bluer`) if Offroute-to-Offroute
+  relay becomes the actual bar for success, not just talking to a
+  third-party test peripheral.
 
 ## Personel hardware-safety mode — blocked on the platform decision
 

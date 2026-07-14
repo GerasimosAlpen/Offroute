@@ -31,11 +31,18 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .manage(commands::bluetooth::BleState::default())
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::device::emit_test_event,
             commands::system_status::get_battery_status,
             commands::system_status::get_network_status,
+            commands::bluetooth::ble_start_scan,
+            commands::bluetooth::ble_stop_scan,
+            commands::bluetooth::ble_list_devices,
+            commands::bluetooth::ble_connect,
+            commands::bluetooth::ble_disconnect,
+            commands::bluetooth::ble_send_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

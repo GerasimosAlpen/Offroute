@@ -3,6 +3,7 @@ import type { Ranger } from "@/lib/rangers";
 import { fetchRoadRoute, buildFallbackRoute, animateRouteReveal } from "@/lib/routing";
 import { evacuationApi } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
 import { useCommsLogStore } from "./commsLog";
 
 export interface EvacuationPoint {
@@ -73,10 +74,13 @@ export const useEvacuationPointsStore = create<EvacuationPointsState>((set, get)
       if (get().loaded) return;
       try {
         const remote = await evacuationApi.points();
-        set({ points: (remote as ApiEvacuationPoint[]).map(apiPointToLocal), loaded: true });
+        const points = (remote as ApiEvacuationPoint[]).map(apiPointToLocal);
+        set({ points, loaded: true });
+        void cacheSet("evacuationPoints", points);
       } catch (err) {
         console.warn("[evacuationPoints] Failed to load from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<EvacuationPoint>("evacuationPoints");
+        set({ points: cached, loaded: true });
       }
     },
 

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { RANGERS, type Ranger } from "@/lib/rangers";
 import { evacuationApi, type CreateEvacRequestDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
 import { useCommsLogStore } from "./commsLog";
 import { useEvacuationPointsStore } from "./evacuationPoints";
 
@@ -69,10 +70,13 @@ export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, 
       if (get().loaded) return;
       try {
         const remote = await evacuationApi.pending();
-        set({ pending: (remote as ApiEvacuationRequest[]).map(apiRequestToLocal), loaded: true });
+        const pending = (remote as ApiEvacuationRequest[]).map(apiRequestToLocal);
+        set({ pending, loaded: true });
+        void cacheSet("evacuationRequests", pending);
       } catch (err) {
         console.warn("[evacReq] Failed to load pending from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<EvacuationPingRequest>("evacuationRequests");
+        set({ pending: cached, loaded: true });
       }
     },
 

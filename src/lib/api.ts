@@ -30,8 +30,9 @@ export const tasksApi = {
 };
 
 export const flareApi = {
-  current:  () => api.get("/flare/current").then((r) => r.data),
-  activate: () => api.post("/flare/activate").then((r) => r.data),
+  current:    () => api.get("/flare/current").then((r) => r.data),
+  activate:   () => api.post("/flare/activate").then((r) => r.data),
+  deactivate: () => api.post("/flare/deactivate").then((r) => r.data),
 };
 
 export const evacuationApi = {
@@ -49,6 +50,7 @@ export const messagesApi = {
 
 export const commsApi = {
   history: () => api.get("/comms/history").then((r) => r.data),
+  append:  (dto: CreateCommsEntryDto) => api.post("/comms", dto).then((r) => r.data),
 };
 
 // ─── DTO / Response types (mirrors backend contracts) ─────────────────────────
@@ -112,4 +114,11 @@ export interface CreateMessagePinDto {
   text: string;
   lat: number;
   lon: number;
+}
+
+export interface CreateCommsEntryDto {
+  sender: string;
+  color: string;
+  lead: string;
+  body: string;
 }

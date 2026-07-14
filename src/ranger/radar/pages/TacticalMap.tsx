@@ -3,6 +3,7 @@ import { HazardStatusPanel } from "../components/tactical-map/HazardStatusPanel"
 import { CommsLogPanel } from "../components/tactical-map/CommsLogPanel";
 import { TacticalMapCanvas } from "../components/tactical-map/TacticalMapCanvas";
 import { StatusBadges } from "../components/tactical-map/StatusBadges";
+import { StandDownButton } from "../components/tactical-map/StandDownButton";
 import { useFlareStore } from "@/store/flare";
 
 export function TacticalMap() {
@@ -29,7 +30,10 @@ export function TacticalMap() {
           </h1>
         </div>
 
-        <StatusBadges />
+        <div className="flex items-center gap-3">
+          <StandDownButton />
+          <StatusBadges />
+        </div>
       </header>
 
       <div className="flex-1 min-h-0 grid grid-cols-12 gap-6">

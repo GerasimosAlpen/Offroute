@@ -9,8 +9,9 @@ import {
   animateRouteReveal,
   simulatedTravelDurationMs,
 } from "@/lib/routing";
-import { tasksApi } from "@/lib/api";
+import { tasksApi, type AssignTaskDto } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { cacheGetAll, cacheSet, enqueueMutation, registerReplayHandler } from "@/lib/offlineCache";
 import { useCommsLogStore } from "./commsLog";
 import { useMessagePinsStore } from "./messagePins";
 
@@ -77,6 +78,16 @@ export function getRangerPosition(rangerId: string, fallback: [number, number]):
 const locallyDrivenHazards = new Set<string>();
 const locallyDrivenRangers = new Set<string>();
 
+// Replays a queued assign() call once back online. Note this re-runs the
+// backend's "pick the nearest free ranger" logic at replay time, which can
+// differ from whichever ranger already animated locally in this session if
+// enough has changed in the meantime — an accepted imprecision, consistent
+// with this store's existing "keep the optimistic local state regardless of
+// what the backend ends up doing" approach everywhere else.
+registerReplayHandler("tasksApi.assign", async (payload) => {
+  await tasksApi.assign(payload as AssignTaskDto);
+});
+
 export const useTasksStore = create<TasksState>((set, get) => {
   // Real-time: reflect other clients' dispatches/arrivals on this map too
   socket.on("task-update", (payload: TaskUpdatePayload) => {
@@ -136,8 +147,8 @@ export const useTasksStore = create<TasksState>((set, get) => {
 
     loadTasks: async () => {
       if (get().loaded) return;
-      try {
-        const remote: ApiTask[] = await tasksApi.list();
+
+      const applyRemote = (remote: ApiTask[]) => {
         set((s) => {
           const tasks = { ...s.tasks };
           const resolvedHazards = { ...s.resolvedHazards };
@@ -165,9 +176,17 @@ export const useTasksStore = create<TasksState>((set, get) => {
           }
           return { tasks, resolvedHazards, rangerLastKnownPos, loaded: true };
         });
+      };
+
+      try {
+        const remote: ApiTask[] = await tasksApi.list();
+        applyRemote(remote);
+        void cacheSet("tasks", remote);
       } catch (err) {
         console.warn("[tasks] Failed to load tasks from API:", err);
-        set({ loaded: true });
+        const cached = await cacheGetAll<ApiTask>("tasks");
+        if (cached.length > 0) applyRemote(cached);
+        else set({ loaded: true });
       }
     },
 
@@ -228,8 +247,9 @@ export const useTasksStore = create<TasksState>((set, get) => {
         // Persist assignment to backend (fire-and-forget — animation continues locally
         // regardless of whether/when this resolves, so a slow or failed backend never
         // blocks or breaks the on-screen dispatch)
+        const assignDto: AssignTaskDto = { hazardId, baseLat: base.lat, baseLon: base.lon };
         tasksApi
-          .assign({ hazardId, baseLat: base.lat, baseLon: base.lon })
+          .assign(assignDto)
           .then((savedTask) => {
             set((s) => {
               const t = s.tasks[hazardId];
@@ -237,7 +257,10 @@ export const useTasksStore = create<TasksState>((set, get) => {
               return { tasks: { ...s.tasks, [hazardId]: { ...t, backendId: savedTask.id } } };
             });
           })
-          .catch((err) => console.warn("[tasks] Failed to persist assign:", err));
+          .catch((err) => {
+            console.warn("[tasks] Failed to persist assign:", err);
+            void enqueueMutation({ domain: "tasks", method: "tasksApi.assign", payload: assignDto });
+          });
 
         let route: [number, number][];
         try {

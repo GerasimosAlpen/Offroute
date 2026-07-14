@@ -10,12 +10,16 @@ import { useMessagePinsStore } from "@/store/messagePins";
 import { useTasksStore } from "@/store/tasks";
 import { useEvacuationPointsStore } from "@/store/evacuationPoints";
 import { useEvacuationRequestsStore } from "@/store/evacuationRequests";
+import { useOnlineStatus } from "@/lib/useOnlineStatus";
+import { initOfflineCache, retryQueuedMutations } from "@/lib/offlineCache";
 
 /**
  * App-level initializer — fires once on mount to sync backend state into
  * Zustand stores before the user interacts with anything.
  */
 function AppInit() {
+  const online = useOnlineStatus();
+
   useEffect(() => {
     // Resume flare state from backend (e.g. page reload after a FLARE was declared)
     void loadFlareState();
@@ -26,7 +30,15 @@ function AppInit() {
     // Resume confirmed evacuation points and pending requests from backend
     void useEvacuationPointsStore.getState().loadPoints();
     void useEvacuationRequestsStore.getState().loadPending();
+    // Set up the local SQLite cache (no-op outside Tauri)
+    void initOfflineCache();
   }, []);
+
+  // Fires once on mount too if already online — flushes anything queued
+  // from a prior session that closed before it could replay.
+  useEffect(() => {
+    if (online) void retryQueuedMutations();
+  }, [online]);
 
   return null;
 }

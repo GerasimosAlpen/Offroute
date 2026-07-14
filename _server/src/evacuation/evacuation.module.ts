@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
 import { EvacuationController } from "./evacuation.controller";
 import { EvacuationService } from "./evacuation.service";
-import { EventsGateway } from "../gateway/events.gateway";
+import { GatewayModule } from "../gateway/gateway.module";
 
 @Module({
+  imports: [GatewayModule],
   controllers: [EvacuationController],
-  providers: [EvacuationService, EventsGateway],
+  providers: [EvacuationService],
 })
 export class EvacuationModule {}
