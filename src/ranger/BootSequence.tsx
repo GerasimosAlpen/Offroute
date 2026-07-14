@@ -370,10 +370,10 @@ export function BootSequence({ children }: { children: ComponentChildren }) {
 
             <div className="flex flex-col items-center gap-1">
               <h1 className="font-grotesk font-bold text-2xl tracking-[-0.4px] text-[#FF0040] uppercase">
-                Ranger OS
+                Offroute
               </h1>
               <p className="text-[11px] tracking-[3px] text-[#666] uppercase">
-                Sector-07 Boot Sequence
+                Field Unit System
               </p>
             </div>
 
