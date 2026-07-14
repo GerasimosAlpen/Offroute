@@ -1,8 +1,9 @@
 import { TriangleAlert } from "lucide-preact";
-import { HAZARDS, type HazardSeverity } from "@/lib/hazards";
-import { RANGERS } from "@/lib/rangers";
+import type { HazardSeverity } from "@/lib/hazards";
 import { useTasksStore } from "@/store/tasks";
 import { useDeviceLocation } from "@/store/location";
+import { useIncidents } from "@/hooks/useIncidents";
+import { usePersonnel } from "@/hooks/usePersonnel";
 
 const SEVERITY_COLOR: Record<HazardSeverity, string> = {
   critical: "#ff0040",
@@ -16,6 +17,10 @@ export function HazardStatusPanel() {
   const resolvedHazards = useTasksStore((s) => s.resolvedHazards);
   const assign = useTasksStore((s) => s.assign);
 
+  // Live data from backend (falls back to static mocks while loading/offline)
+  const { data: hazards = [] } = useIncidents();
+  const { data: personnel = [] } = usePersonnel();
+
   return (
     <div className="flex-1 min-h-0 bg-[#262626] border border-[#444] flex flex-col overflow-hidden">
       <header className="shrink-0 h-9 flex items-center gap-2 px-4 bg-[#131313] border-b border-[#444]">
@@ -26,16 +31,13 @@ export function HazardStatusPanel() {
       </header>
 
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-3 p-4">
-        {HAZARDS.map((hazard) => {
+        {hazards.map((hazard) => {
           const task = tasks[hazard.id];
           const resolved = resolvedHazards[hazard.id];
-          // Live task takes priority (has a real-time position); a resolved
-          // hazard whose ranger has since moved on to something else still
-          // shows who handled it, just without the "mark evac point" action
-          // (that needs the ranger's *current* position, which we no longer
-          // track here once they've left).
           const rangerId = task?.rangerId ?? resolved?.rangerId;
-          const rangerProfile = rangerId ? RANGERS.find((r) => r.id === rangerId) : undefined;
+          const rangerProfile = rangerId
+            ? (personnel as Array<{ id: string; name: string; callsign: string }>).find((r) => r.id === rangerId)
+            : undefined;
 
           return (
             <div
