@@ -236,18 +236,41 @@ selection remain synthetic multipliers on straight-line distance rather than
 three actually-distinct OSRM routes (OSRM's free demo endpoint doesn't do
 alternatives cleanly) — only the one actually picked gets a real path.
 
-**"Searching for the best route" flicker — purely cosmetic.** The real OSRM
-fetch is usually sub-second, which read as an instant snap with nothing
-communicated. While `fetchRoadRoute` is in flight, `PetaTaktis.tsx` now
-flickers a new jittered fake candidate path (`buildFallbackRoute` bent
-toward a randomized point near the destination) roughly every 80ms, alongside
-a rising "N KOMBINASI DIUJI" (combinations tried) counter in the active-route
-banner — neither the candidate paths nor the counter are real; no actual
-route comparison happens, it's there purely so the (fast) wait *reads* as the
-algorithm doing visible work rather than a stall. A `Promise.all` floor of
-650ms keeps it from being a single invisible frame on a fast connection. All
-gated by the same `routeToken` ref as the real reveal, so switching routes
-mid-flicker doesn't leave a stale animation running.
+**"Route search" cinematic — purely a visualization, not a routing
+algorithm.** The real OSRM fetch is usually sub-second, which read as an
+instant snap with nothing communicated. Picking a route option in
+`PetaTaktis.tsx` now runs a multi-beat sequence, built to read as "the
+algorithm is doing real, fast, thorough work" on a screen small enough that
+it also has to double as reassurance for the crew member about to move:
+
+1. **Scan** — camera zooms *out* (`map.flyToBounds`) to frame the whole area
+   between the ranger and the incident.
+2. **Generate** — `CANDIDATE_COUNT` (8) distinct candidate paths spread across
+   a `bend` range (see `buildFallbackRoute`'s new `bend` param in
+   `src/lib/routing.ts`) all fill in at once, staggered like a wave via
+   `animateRouteReveal`, each colored differently and each carrying invented
+   distance/time/risk/terrain stats (`buildCandidates`). The real
+   `fetchRoadRoute` call fires in parallel here, not awaited yet.
+3. **Evaluate** — a sort-visualizer-style sweep steps through every
+   candidate one at a time, flashing its stats into the HUD and dimming it
+   unless it's the new "best so far" (lowest fake weighted score).
+4. **Winner** — camera pushes *in* tight on the winning candidate's bounds.
+5. **Contingency** — a fixed checklist of field scenarios (road blocked,
+   landslide, GPS lost → offline/Bluetooth fallback, new danger zone, bad
+   weather) ticks past with a simulated "covered" result each, so the crew
+   sees likely failure modes acknowledged before they move — this part is
+   pure UI, nothing here actually reads live GPS/hazard state yet.
+6. **Resolve** — the winning candidate is swapped for the real OSRM/fallback
+   geometry that finished fetching back in step 2, and the normal solid
+   route line + "NAVIGASI AKTIF" banner take over.
+
+None of the candidate scoring, terrain/risk labels, or scenario outcomes are
+real — only the final destination and the swapped-in real route geometry
+are. Documented here so this doesn't get mistaken for actual routing logic
+later. The whole component (`RouteSearchSequence` in `PetaTaktis.tsx`) is
+keyed by `runId` so picking a new route mid-sequence fully remounts and
+cancels the old one via its effect cleanup, same cancellation pattern as
+`FlareSequence` on the radar side.
 
 ## Realtime task-based ranger tracking + smooth glide — built
 

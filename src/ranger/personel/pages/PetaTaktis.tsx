@@ -600,7 +600,6 @@ export function PetaTaktis() {
   // whatever was still in flight) instead of reusing stale state.
   const [searching, setSearching] = useState(false);
   const [runId, setRunId] = useState(0);
-  const [searchPhase, setSearchPhase] = useState<SearchPhase>("scanning");
   const [searchLabel, setSearchLabel] = useState("");
   const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
   const [searchProgress, setSearchProgress] = useState(0);
@@ -673,7 +672,6 @@ export function PetaTaktis() {
     setActiveRoute(route);
     setShowRouteSheet(false);
     setRouteLine([]);
-    setSearchPhase("scanning");
     setSearchLabel("MEMINDAI AREA PENCARIAN...");
     setSearchParams(null);
     setSearchProgress(0);
@@ -844,21 +842,31 @@ export function PetaTaktis() {
             {/* User location */}
             <Marker position={userPos} icon={SELF_ICON} />
 
-            {/* Flickering fake candidates while the real route resolves —
-                purely cosmetic, sells "algorithm searching fast," never
-                actually considered for the final path */}
-            {computing && candidateLine.length > 1 && (
-              <Polyline
-                key={candidateCount}
-                positions={candidateLine}
-                pathOptions={{ color: candidateColor, weight: 2, opacity: 0.45, dashArray: "3 8" }}
+            {/* Epic route-search cinematic — every candidate filling in,
+                sweep-compared, winner zoomed into, then swapped for the
+                real OSRM geometry (see RouteSearchSequence above) */}
+            {searching && selectedEvent && (
+              <RouteSearchSequence
+                key={runId}
+                destination={selectedEvent}
+                userPos={userPos}
+                onPhase={(_phase, label, params, progress) => {
+                  setSearchLabel(label);
+                  setSearchParams(params);
+                  setSearchProgress(progress);
+                }}
+                onScenarioTick={(entry) => setScenarioLog((prev) => [...prev, entry])}
+                onResolved={(route) => {
+                  setRouteLine(route);
+                  setSearching(false);
+                }}
               />
             )}
 
             {/* Active route, road-snapped via OSRM (src/lib/routing.ts), same
                 engine radar uses to dispatch units — with the bezier-curve
                 fallback if OSRM's unreachable */}
-            {activeRoute && !computing && routeLine.length > 1 && (
+            {activeRoute && !searching && routeLine.length > 1 && (
               <Polyline
                 positions={routeLine}
                 pathOptions={{ color: activeRoute.color, weight: 4, opacity: 0.85 }}
