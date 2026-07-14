@@ -10,8 +10,10 @@ import { useCommsLogStore } from "@/store/commsLog";
 import { useBmkgQuake } from "@/store/bmkg";
 import { useTasksStore, getRangerPosition } from "@/store/tasks";
 import { useMessagePinsStore } from "@/store/messagePins";
-import { RANGERS, type Ranger } from "@/lib/rangers";
-import { HAZARDS, type HazardKind } from "@/lib/hazards";
+import { type Ranger } from "@/lib/rangers";
+import { type HazardKind } from "@/lib/hazards";
+import { useIncidents } from "@/hooks/useIncidents";
+import { usePersonnel } from "@/hooks/usePersonnel";
 import {
   fetchRoadRoute,
   buildFallbackRoute,
@@ -59,13 +61,7 @@ function buildHazardIcon(kind: HazardKind, label: string, minimized = false) {
   });
 }
 
-// Icons built once per hazard from the shared `HAZARDS` data (src/lib/hazards.ts) — same source the Status Taktis sidebar panel reads, so map markers and the sidebar list always agree.
-const HAZARD_ICONS: Record<string, { icon: L.DivIcon; iconMinimized: L.DivIcon }> = Object.fromEntries(
-  HAZARDS.map((h) => [
-    h.id,
-    { icon: buildHazardIcon(h.kind, h.label), iconMinimized: buildHazardIcon(h.kind, h.label, true) },
-  ]),
-);
+// Icons are built dynamically in FocusableMarkers to support live data.
 
 const SELF_ICON = L.divIcon({
   className: "",
@@ -181,17 +177,18 @@ function FocusableMarkers({ ranger, phase }: { ranger: { lat: number; lon: numbe
   const map = useMap();
   const focus = (pos: [number, number]) => map.flyTo(pos, 18, { duration: 1 });
   const minimizeMinorHazards = ACTIVE_DRILL_PHASES.includes(phase);
+  const { data: hazards = [] } = useIncidents();
 
   return (
     <>
-      {HAZARDS.map((hazard) => {
+      {hazards.map((hazard) => {
         const pos: [number, number] = [ranger.lat + hazard.offset[0], ranger.lon + hazard.offset[1]];
-        const icons = HAZARD_ICONS[hazard.id];
+        const icon = buildHazardIcon(hazard.kind, hazard.label, minimizeMinorHazards);
         return (
           <Marker
             key={hazard.id}
             position={pos}
-            icon={minimizeMinorHazards ? icons.iconMinimized : icons.icon}
+            icon={icon}
             eventHandlers={{ click: () => focus(pos) }}
           />
         );
@@ -221,11 +218,12 @@ function TaskMarkers() {
   const tasks = useTasksStore((s) => s.tasks);
   const map = useMap();
   const focus = (pos: [number, number]) => map.flyTo(pos, 18, { duration: 1 });
+  const { data: personnel = [] } = usePersonnel();
 
   return (
     <>
       {Object.values(tasks).flatMap((task) => {
-        const rangerProfile = RANGERS.find((r) => r.id === task.rangerId);
+        const rangerProfile = personnel.find((r) => r.id === task.rangerId);
         const label = rangerProfile
           ? task.status === "arrived"
             ? `${rangerProfile.name} · TIBA`
@@ -357,6 +355,8 @@ function FlareSequence({
   onProgress: (progress: FlareProgress) => void;
 }) {
   const map = useMap();
+  const { data: personnel = [] } = usePersonnel();
+  const { data: hazards = [] } = useIncidents();
   const [revealedMesh, setRevealedMesh] = useState<Ranger[]>([]);
   const [dispatchedId, setDispatchedId] = useState<string | null>(null);
   const [unitPos, setUnitPos] = useState<[number, number] | null>(null);
@@ -407,7 +407,9 @@ function FlareSequence({
       setVictim(null);
       setBackupUnits({});
       setFocusedId(null);
-      onProgress({ unitsDispatched: 0, totalUnits: RANGERS.length, etaMs: null });
+      // Wait for personnel to load before proceeding with flare logic
+      if (personnel.length === 0) return;
+      onProgress({ unitsDispatched: 0, totalUnits: personnel.length, etaMs: null });
 
       // 0. Freeze-frame beat — a held breath before everything cuts loose.
       await wait(280);
@@ -423,10 +425,10 @@ function FlareSequence({
       // 2. Scan — pull back to reveal who's available via the mesh.
       onPhaseChange("scan", "MEMINDAI PERSONEL TERSEDIA VIA MESH BLUETOOTH");
       const bounds = L.latLngBounds([[ranger.lat, ranger.lon], epicenter]);
-      for (const node of RANGERS) {
+      for (const node of personnel) {
         if (cancelled) return;
-        setRevealedMesh((prev) => [...prev, node]);
-        bounds.extend(posOf(node));
+        setRevealedMesh((prev) => [...prev, node as unknown as Ranger]);
+        bounds.extend(posOf(node as unknown as Ranger));
         await wait(420);
       }
       if (cancelled) return;
@@ -435,7 +437,7 @@ function FlareSequence({
         sender: "SISTEM",
         color: "#5fb3b3",
         lead: "MESH",
-        body: `${RANGERS.length} personel terdeteksi via bluetooth.`,
+        body: `${personnel.length} personel terdeteksi via bluetooth.`,
       });
       await wait(1400);
       if (cancelled) return;
@@ -451,13 +453,13 @@ function FlareSequence({
         body: "menghitung seluruh kemungkinan rute evakuasi untuk semua tim.",
       });
 
-      const blockedRoadPositions: [number, number][] = HAZARDS.filter((h) => h.kind === "blocked").map(
+      const blockedRoadPositions: [number, number][] = hazards.filter((h) => h.kind === "blocked").map(
         (h) => [ranger.lat + h.offset[0], ranger.lon + h.offset[1]] as [number, number],
       );
 
       const allRoutes = await Promise.all(
-        RANGERS.map(async (node) => {
-          const from: [number, number] = posOf(node);
+        personnel.map(async (node) => {
+          const from: [number, number] = posOf(node as unknown as Ranger);
           const r = (await fetchRoadRoute(from, epicenter)) ?? buildFallbackRoute(from, epicenter);
           return { rangerId: node.id, route: r, blocked: routeBlockedBy(r, blockedRoadPositions) };
         }),
@@ -465,9 +467,9 @@ function FlareSequence({
       if (cancelled) return;
 
       // Prefer an available (unblocked) route over a merely-shorter blocked one.
-      const nearest = RANGERS
+      const nearest = personnel
         .map((node) => {
-          const pos: [number, number] = posOf(node);
+          const pos: [number, number] = posOf(node as unknown as Ranger);
           const routeInfo = allRoutes.find((r) => r.rangerId === node.id);
           return { node, d: metersBetween(pos, epicenter), blocked: routeInfo?.blocked ?? false };
         })
@@ -506,7 +508,7 @@ function FlareSequence({
       await wait(500);
       if (cancelled) return;
 
-      const start: [number, number] = posOf(nearest);
+      const start: [number, number] = posOf(nearest as unknown as Ranger);
       onPhaseChange("dispatch", `TERDEKAT: ${senderName} · MENGIRIM RUTE TERBAIK...`);
       log({
         sender: senderName,
@@ -521,7 +523,7 @@ function FlareSequence({
       setDispatchedId(nearest.id);
       setUnitPos(start);
       setTrail([start]);
-      onProgress({ unitsDispatched: 1, totalUnits: RANGERS.length, etaMs: travelDurationMs });
+      onProgress({ unitsDispatched: 1, totalUnits: personnel.length, etaMs: travelDurationMs });
 
       // Trace the chosen route from start to end instead of it just appearing.
       await animateRouteReveal(
@@ -563,7 +565,7 @@ function FlareSequence({
           useTasksStore.getState().setRangerPosition(nearest.id, pos);
           onProgress({
             unitsDispatched: 1,
-            totalUnits: RANGERS.length,
+            totalUnits: personnel.length,
             etaMs: Math.max(0, travelDurationMs * (1 - t)),
           });
 
@@ -600,7 +602,7 @@ function FlareSequence({
       // and drawn) and the ranger's position is pinned to where they actually
       // are now — same pattern as the ad-hoc task system's arrival handling.
       onPhaseChange("arrived", `${senderName} TIBA DI LOKASI`);
-      onProgress({ unitsDispatched: 1, totalUnits: RANGERS.length, etaMs: 0 });
+      onProgress({ unitsDispatched: 1, totalUnits: personnel.length, etaMs: 0 });
       log({ sender: senderName, color: "#5fb3b3", lead: "TIBA", body: "di lokasi. Memulai pencarian korban." });
       map.flyTo(epicenter, 18, { duration: 1, easeLinearity: 0.15 });
       setTrail([]);
@@ -646,7 +648,7 @@ function FlareSequence({
       // a major emergency like this one, never a minor ad-hoc hazard. No
       // personel app exists yet, so this stands in for that tap; PUSAT
       // (radar) still has to accept or reject it before anything's pinned.
-      useEvacuationRequestsStore.getState().request(nearest, epicenter, epicenter);
+      useEvacuationRequestsStore.getState().request(nearest as unknown as Ranger, epicenter, epicenter);
 
       // 6. Reporting — everyone else who's actually free (not already tied
       // up on an ad-hoc task) heads to the emergency too, to help search for
@@ -658,7 +660,7 @@ function FlareSequence({
           .filter((t) => t.status === "enroute")
           .map((t) => t.rangerId),
       );
-      const backupNodes = RANGERS.filter((n) => n.id !== nearest.id && !busyRangerIds.has(n.id));
+      const backupNodes = personnel.filter((n) => n.id !== nearest.id && !busyRangerIds.has(n.id));
 
       for (const node of backupNodes) {
         if (cancelled) return;
@@ -681,7 +683,7 @@ function FlareSequence({
             epicenter[0] + (i % 2 === 0 ? 1 : -1) * 0.0009,
             epicenter[1] + (i % 3 === 0 ? -1 : 1) * 0.0009,
           ];
-          const start = posOf(node);
+          const start = posOf(node as unknown as Ranger);
           const backupRoute = (await fetchRoadRoute(start, scatter)) ?? buildFallbackRoute(start, scatter);
           if (cancelled) return;
           setBackupUnits((prev) => ({ ...prev, [node.id]: { pos: start, route: backupRoute } }));
@@ -787,12 +789,12 @@ function FlareSequence({
       {unitPos && dispatchedId && (
         <Marker
           position={unitPos}
-          icon={buildRangerIcon(RANGERS.find((n) => n.id === dispatchedId)?.name ?? "")}
+          icon={buildRangerIcon(personnel.find((n) => n.id === dispatchedId)?.name ?? "")}
         />
       )}
 
       {Object.entries(backupUnits).flatMap(([id, unit]) => {
-        const node = RANGERS.find((r) => r.id === id);
+        const node = personnel.find((r) => r.id === id);
         if (!node) return [];
         const layers = [];
         // Only the focused unit's route is drawn — with several units
@@ -926,7 +928,7 @@ export function TacticalMapCanvas() {
   const [freeze, setFreeze] = useState(false);
   const [progress, setProgress] = useState<FlareProgress>({
     unitsDispatched: 0,
-    totalUnits: RANGERS.length,
+    totalUnits: 0,
     etaMs: null,
   });
   const shakeControls = useAnimation();

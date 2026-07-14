@@ -1,10 +1,25 @@
-import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { Module } from "@nestjs/common";
+import { ConfigModule } from "@nestjs/config";
+import { PrismaModule } from "./prisma/prisma.module";
+import { PersonnelModule } from "./personnel/personnel.module";
+import { IncidentsModule } from "./incidents/incidents.module";
+import { TasksModule } from "./tasks/tasks.module";
+import { FlareModule } from "./flare/flare.module";
+import { EvacuationModule } from "./evacuation/evacuation.module";
+import { MessagesModule } from "./messages/messages.module";
+import { CommsModule } from "./comms/comms.module";
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    PrismaModule,
+    PersonnelModule,
+    IncidentsModule,
+    TasksModule,
+    FlareModule,
+    EvacuationModule,
+    MessagesModule,
+    CommsModule,
+  ],
 })
 export class AppModule {}

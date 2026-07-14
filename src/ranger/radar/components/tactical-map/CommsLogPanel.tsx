@@ -5,8 +5,12 @@ import { useCommsLogStore } from "@/store/commsLog";
 export function CommsLogPanel() {
   const entries = useCommsLogStore((s) => s.entries);
   const append = useCommsLogStore((s) => s.append);
+  const loadHistory = useCommsLogStore((s) => s.loadHistory);
   const [draft, setDraft] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
+
+  // Load comms history from backend on first mount
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });

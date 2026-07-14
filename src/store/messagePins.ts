@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { messagesApi, type CreateMessagePinDto } from "@/lib/api";
+import { socket } from "@/lib/socket";
 
 export interface MessagePin {
   id: string;
@@ -6,7 +8,6 @@ export interface MessagePin {
   rangerName: string;
   callsign: string;
   text: string;
-  /** Wherever the ranger actually was standing when they sent this. */
   lat: number;
   lon: number;
   timestamp: number;
@@ -14,19 +15,75 @@ export interface MessagePin {
 
 interface MessagePinsState {
   pins: MessagePin[];
-  addPin: (pin: Omit<MessagePin, "id" | "timestamp">) => void;
+  loaded: boolean;
+  addPin: (pin: Omit<MessagePin, "id" | "timestamp">) => Promise<void>;
+  loadPins: () => Promise<void>;
+}
+
+function apiPinToLocal(p: Record<string, unknown>): MessagePin {
+  return {
+    id: p.id as string,
+    rangerId: p.rangerId as string,
+    rangerName: p.rangerName as string,
+    callsign: p.callsign as string,
+    text: p.text as string,
+    lat: p.lat as number,
+    lon: p.lon as number,
+    timestamp: new Date(p.createdAt as string).getTime(),
+  };
 }
 
 /**
- * Status messages from personel, pinned to wherever they were when they sent
- * them — like sharing a location in a chat app. Real version needs the
- * geotagged-message backend work (see TODO.md); this is populated by the
- * simulated task-assignment flow in `src/store/tasks.ts` for now.
+ * Geotagged status messages from personel.
+ * Persisted to backend (POST /messages/pin) and live via message-pin WS event.
  */
-export const useMessagePinsStore = create<MessagePinsState>((set) => ({
-  pins: [],
-  addPin: (pin) =>
-    set((s) => ({
-      pins: [...s.pins, { ...pin, id: `${pin.rangerId}-${Date.now()}`, timestamp: Date.now() }],
-    })),
-}));
+export const useMessagePinsStore = create<MessagePinsState>((set, get) => {
+  // Real-time: any client posting a pin broadcasts it to all others
+  socket.on("message-pin", (pin: Record<string, unknown>) => {
+    const local = apiPinToLocal(pin);
+    const exists = get().pins.some((p) => p.id === local.id);
+    if (!exists) set((s) => ({ pins: [...s.pins, local] }));
+  });
+
+  return {
+    pins: [],
+    loaded: false,
+
+    loadPins: async () => {
+      if (get().loaded) return;
+      try {
+        const remote = await messagesApi.pins();
+        set({ pins: remote.map(apiPinToLocal), loaded: true });
+      } catch (err) {
+        console.warn("[messagePins] Failed to load from API:", err);
+        set({ loaded: true });
+      }
+    },
+
+    addPin: async (pin) => {
+      // Optimistic local add
+      const localId = `${pin.rangerId}-${Date.now()}`;
+      const localPin: MessagePin = { ...pin, id: localId, timestamp: Date.now() };
+      set((s) => ({ pins: [...s.pins, localPin] }));
+
+      try {
+        const dto: CreateMessagePinDto = {
+          rangerId: pin.rangerId,
+          rangerName: pin.rangerName,
+          callsign: pin.callsign,
+          text: pin.text,
+          lat: pin.lat,
+          lon: pin.lon,
+        };
+        const saved = await messagesApi.addPin(dto);
+        // Replace the optimistic pin with the server-persisted version
+        set((s) => ({
+          pins: s.pins.map((p) => (p.id === localId ? apiPinToLocal(saved) : p)),
+        }));
+      } catch (err) {
+        console.warn("[messagePins] Failed to persist pin to backend:", err);
+        // Keep the optimistic pin — it's still visible locally
+      }
+    },
+  };
+});
