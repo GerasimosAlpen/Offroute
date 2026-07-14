@@ -5,6 +5,7 @@ import L from "leaflet";
 import { motion, AnimatePresence } from "framer-motion";
 
 import { useDeviceLocation } from "@/store/location";
+import { useDeviceHeading, startHeadingWatch } from "@/store/heading";
 import { metersBetween, fetchRoadRoute, buildFallbackRoute, animateRouteReveal, routeLengthMeters } from "@/lib/routing";
 import "@/lib/leaflet-setup";
 
@@ -51,6 +52,11 @@ const TYPE_ICONS_SVG: Record<string, string> = {
 
 // ─── Map Icons ───────────────────────────────────────────────────────────────
 
+// Markers sit inside the same wrapper that gets CSS-rotated to match device
+// heading (see the `--map-heading` var set in PetaTaktis below) — every
+// marker counter-rotates by that same var so labels/icons stay upright and
+// legible instead of spinning along with the base map. A no-op (0deg) when
+// heading isn't available, so nothing changes for the plain north-up case.
 function buildEventIcon(event: EventMarker) {
   const c = DANGER_COLORS[event.danger];
   const svg = TYPE_ICONS_SVG[event.type];
@@ -61,7 +67,7 @@ function buildEventIcon(event: EventMarker) {
   return L.divIcon({
     className: "",
     html: `
-      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(-50%,-100%);">
+      <div style="display:flex;flex-direction:column;align-items:center;gap:3px;transform:translate(-50%,-100%) rotate(var(--map-heading, 0deg));">
         <div style="position:relative;width:36px;height:36px;display:flex;align-items:center;justify-content:center;background:#1a1a1a;border:2px solid ${c.border};box-shadow:${c.glow};">
           ${pulse}
           ${svg}
@@ -84,6 +90,22 @@ const SELF_ICON = L.divIcon({
     <div style="position:relative;width:16px;height:16px;transform:translate(-50%,-50%);">
       <span style="position:absolute;inset:0;border-radius:9999px;background:#3ddc59;opacity:0.6;animation:pulse 2s infinite;"></span>
       <span style="position:absolute;inset:3px;border-radius:9999px;background:#3ddc59;border:2px solid #0a0a0a;"></span>
+      <span style="position:absolute;left:50%;top:-13px;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid #3ddc59;transform:translateX(-50%);opacity:var(--heading-available, 0);filter:drop-shadow(0 0 3px rgba(61,220,89,0.7));"></span>
+    </div>
+  `,
+  iconSize: [0, 0],
+});
+
+// The fixed point a route search began from — distinct from the live SELF_ICON
+// dot, which keeps moving with GPS. Lets the crew see start vs. current
+// position vs. destination all at once instead of just one wandering dot.
+const START_ICON = L.divIcon({
+  className: "",
+  html: `
+    <div style="transform:translate(-50%,-100%) rotate(var(--map-heading, 0deg));">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8888ff" stroke-width="2.2" style="filter:drop-shadow(0 0 4px rgba(136,136,255,0.6));">
+        <path d="M5 21V4a1 1 0 0 1 1-1h11.5a.5.5 0 0 1 .4.8L14 9l3.9 5.2a.5.5 0 0 1-.4.8H6" />
+      </svg>
     </div>
   `,
   iconSize: [0, 0],
@@ -586,6 +608,48 @@ function MapControls({ userPos }: { userPos: [number, number] | null }) {
   );
 }
 
+// ─── Intro Cinematic ───────────────────────────────────────────────────────
+
+/**
+ * Runs once, the first time a real GPS fix lands — always establishes the
+ * crew's actual starting point first (zoom out to orient, then a smooth
+ * push-in), instead of the map just silently appearing already zoomed in on
+ * a coordinate with no context for where that even is.
+ */
+function IntroSequence({ startPos }: { startPos: [number, number] }) {
+  const map = useMap();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function run() {
+      map.setView(startPos, 12, { animate: false });
+      await wait(500);
+      if (cancelled) return;
+      map.flyTo(startPos, 16, { duration: 1.6, easeLinearity: 0.15 });
+    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return null;
+}
+
+// ─── Live Follow ───────────────────────────────────────────────────────────
+
+/** While actively navigating, keeps the camera gently centered on the crew's live GPS fix as it updates — so the dot moving is something you can actually see happening, not something you have to go look for. */
+function LiveFollow({ pos, active }: { pos: [number, number]; active: boolean }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!active) return;
+    map.panTo(pos, { animate: true, duration: 0.8, easeLinearity: 0.25 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pos[0], pos[1], active]);
+  return null;
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────
 
 export function PetaTaktis() {
@@ -604,10 +668,22 @@ export function PetaTaktis() {
   const [searchParams, setSearchParams] = useState<SearchParams | null>(null);
   const [searchProgress, setSearchProgress] = useState(0);
   const [scenarioLog, setScenarioLog] = useState<{ label: string; result: string }[]>([]);
+  const { heading, available: headingAvailable } = useDeviceHeading();
 
+  // Live position — reflects every GPS fix, moves as the crew actually moves.
   const userPos: [number, number] = coords
     ? [coords.lat, coords.lon]
     : [-6.1818, 106.8223];
+
+  // Starting point — captured once, from the first real fix, and never
+  // moves again. Hazard positions below are anchored to this (not the live
+  // position), so they stay put on the map instead of drifting as the crew
+  // walks around; it's also what the intro cinematic and the "start" pin use.
+  const [startPos, setStartPos] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    if (coords && !startPos) setStartPos([coords.lat, coords.lon]);
+  }, [coords, startPos]);
+  const anchorPos = startPos ?? userPos;
 
   const EVENTS: EventMarker[] = [
     {
@@ -616,7 +692,7 @@ export function PetaTaktis() {
       type: "KEBAKARAN",
       danger: "KRITIS",
       label: "KODE MERAH: API",
-      pos: [userPos[0] + 0.003, userPos[1] - 0.004],
+      pos: [anchorPos[0] + 0.003, anchorPos[1] - 0.004],
       distance: "0.8 KM",
       affected: 37,
     },
@@ -626,7 +702,7 @@ export function PetaTaktis() {
       type: "BENCANA",
       danger: "TINGGI",
       label: "JALUR PUTUS",
-      pos: [userPos[0] - 0.005, userPos[1] + 0.006],
+      pos: [anchorPos[0] - 0.005, anchorPos[1] + 0.006],
       distance: "1.4 KM",
       affected: 12,
     },
@@ -636,7 +712,7 @@ export function PetaTaktis() {
       type: "MEDIS",
       danger: "TINGGI",
       label: "DARURAT MEDIS",
-      pos: [userPos[0] - 0.002, userPos[1] - 0.003],
+      pos: [anchorPos[0] - 0.002, anchorPos[1] - 0.003],
       distance: "0.5 KM",
       affected: 3,
     },
@@ -646,7 +722,7 @@ export function PetaTaktis() {
       type: "KEAMANAN",
       danger: "SEDANG",
       label: "POSKO AMAN",
-      pos: [userPos[0] + 0.001, userPos[1] + 0.002],
+      pos: [anchorPos[0] + 0.001, anchorPos[1] + 0.002],
       distance: "0.3 KM",
       affected: 80,
     },
@@ -664,6 +740,10 @@ export function PetaTaktis() {
   };
 
   const handleNavigate = () => {
+    // iOS requires DeviceOrientationEvent.requestPermission() to be called
+    // from a real tap — this is the first tap in the navigate flow, so it's
+    // the right place. No-ops safely wherever the API doesn't exist at all.
+    void startHeadingWatch();
     setShowRouteSheet(true);
   };
 
@@ -828,62 +908,92 @@ export function PetaTaktis() {
         />
 
         {coords ? (
-          <MapContainer
-            center={userPos}
-            zoom={15}
-            zoomControl={false}
-            style={{ height: "100%", width: "100%", zIndex: 1 }}
+          // Oversized (150%) and re-centered so that when the inner div is
+          // CSS-rotated to match device heading, its corners still fully
+          // cover the (smaller, overflow-hidden) viewport — a plain 100%
+          // box would expose blank triangles at the corners on rotation.
+          // `transform` only applies once a real heading is available;
+          // otherwise this is just an inert wrapper around a north-up map.
+          <div
+            className="absolute"
+            style={
+              {
+                top: "-25%",
+                left: "-25%",
+                width: "150%",
+                height: "150%",
+                "--map-heading": `${heading ?? 0}deg`,
+                "--heading-available": headingAvailable ? 1 : 0,
+                transform: headingAvailable && heading !== null ? "rotate(calc(-1 * var(--map-heading)))" : "none",
+                transition: "transform 0.35s linear",
+              } as any
+            }
           >
-            <TileLayer
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-              subdomains="abcd"
-            />
-
-            {/* User location */}
-            <Marker position={userPos} icon={SELF_ICON} />
-
-            {/* Epic route-search cinematic — every candidate filling in,
-                sweep-compared, winner zoomed into, then swapped for the
-                real OSRM geometry (see RouteSearchSequence above) */}
-            {searching && selectedEvent && (
-              <RouteSearchSequence
-                key={runId}
-                destination={selectedEvent}
-                userPos={userPos}
-                onPhase={(_phase, label, params, progress) => {
-                  setSearchLabel(label);
-                  setSearchParams(params);
-                  setSearchProgress(progress);
-                }}
-                onScenarioTick={(entry) => setScenarioLog((prev) => [...prev, entry])}
-                onResolved={(route) => {
-                  setRouteLine(route);
-                  setSearching(false);
-                }}
+            <MapContainer
+              center={userPos}
+              zoom={15}
+              zoomControl={false}
+              style={{ height: "100%", width: "100%", zIndex: 1 }}
+            >
+              <TileLayer
+                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                subdomains="abcd"
               />
-            )}
 
-            {/* Active route, road-snapped via OSRM (src/lib/routing.ts), same
-                engine radar uses to dispatch units — with the bezier-curve
-                fallback if OSRM's unreachable */}
-            {activeRoute && !searching && routeLine.length > 1 && (
-              <Polyline
-                positions={routeLine}
-                pathOptions={{ color: activeRoute.color, weight: 4, opacity: 0.85 }}
-              />
-            )}
+              {/* Establishing shot — always opens on the crew's real
+                  starting point before anything else happens */}
+              {startPos && <IntroSequence startPos={startPos} />}
 
-            {/* Event markers */}
-            {EVENTS.map((event) => (
-              <EventMapMarker
-                key={event.id}
-                event={event}
-                onSelect={handleSelectEvent}
-              />
-            ))}
+              {/* Fixed pin at the point the crew started from */}
+              {startPos && <Marker position={startPos} icon={START_ICON} />}
 
-            <MapControls userPos={userPos} />
-          </MapContainer>
+              {/* Live position — actually moves with GPS fixes */}
+              <Marker position={userPos} icon={SELF_ICON} />
+              <LiveFollow pos={userPos} active={!!activeRoute && !searching} />
+
+              {/* Epic route-search cinematic — every candidate filling in,
+                  sweep-compared, winner zoomed into, then swapped for the
+                  real OSRM geometry (see RouteSearchSequence above) */}
+              {searching && selectedEvent && (
+                <RouteSearchSequence
+                  key={runId}
+                  destination={selectedEvent}
+                  userPos={startPos ?? userPos}
+                  onPhase={(_phase, label, params, progress) => {
+                    setSearchLabel(label);
+                    setSearchParams(params);
+                    setSearchProgress(progress);
+                  }}
+                  onScenarioTick={(entry) => setScenarioLog((prev) => [...prev, entry])}
+                  onResolved={(route) => {
+                    setRouteLine(route);
+                    setSearching(false);
+                  }}
+                />
+              )}
+
+              {/* Active route, road-snapped via OSRM (src/lib/routing.ts), same
+                  engine radar uses to dispatch units — with the bezier-curve
+                  fallback if OSRM's unreachable */}
+              {activeRoute && !searching && routeLine.length > 1 && (
+                <Polyline
+                  positions={routeLine}
+                  pathOptions={{ color: activeRoute.color, weight: 4, opacity: 0.85 }}
+                />
+              )}
+
+              {/* Event markers */}
+              {EVENTS.map((event) => (
+                <EventMapMarker
+                  key={event.id}
+                  event={event}
+                  onSelect={handleSelectEvent}
+                />
+              ))}
+
+              <MapControls userPos={userPos} />
+            </MapContainer>
+          </div>
         ) : (
           <div className="absolute inset-0 z-[1] flex items-center justify-center bg-[#0a0a0a]">
             <span className="font-mono text-xs text-[#666] uppercase tracking-[2px]">
@@ -894,6 +1004,12 @@ export function PetaTaktis() {
 
         {/* Coord overlay */}
         <div className="absolute top-3 left-3 flex flex-col gap-0.5 z-[1000]">
+          {coords && (
+            <div className="px-1.5 py-0.5 bg-[#131313]/90 border border-[#66df75]/40 font-mono text-[9px] text-[#66df75] tracking-wider flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-[#66df75] animate-pulse" />
+              LIVE
+            </div>
+          )}
           <div className="px-1.5 py-0.5 bg-[#131313]/90 border border-[#333] font-mono text-[10px] text-[#555] tracking-wider">
             {coords ? `LAT: ${coords.lat.toFixed(5)}°` : "LAT: —"}
           </div>
@@ -917,9 +1033,12 @@ export function PetaTaktis() {
         </div>
       </main>
 
-      {/* Event popup (above nav bar) */}
+      {/* Event popup (above nav bar) — hidden once a route is being searched
+          or is active, so the epic search cinematic and the resulting
+          navigation view get the full map instead of this card lingering
+          over a third of the screen */}
       <AnimatePresence>
-        {selectedEvent && !showRouteSheet && (
+        {selectedEvent && !showRouteSheet && !searching && !activeRoute && (
           <EventPopup
             event={selectedEvent}
             userPos={userPos}
