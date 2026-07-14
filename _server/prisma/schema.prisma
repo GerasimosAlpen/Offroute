@@ -7,7 +7,134 @@ datasource db {
   provider = "postgresql"
 }
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+/// Ranger / field personel. Matches src/lib/rangers.ts Ranger interface.
+model Personnel {
+  id               String            @id @default(cuid())
+  name             String
+  callsign         String
+  offsetLat        Float
+  offsetLon        Float
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  evacuationPoints EvacuationPoint[]
+  flareDispatches  FlareDispatch[]
+  messagePins      MessagePin[]
+  resolvedHazards  ResolvedHazard[]
+  tasks            Task[]
+}
+
+/// Incident / hazard report. Matches src/lib/hazards.ts HazardData interface.
+model Incident {
+  id             String          @id @default(cuid())
+  kind           HazardKind
+  label          String
+  description    String
+  severity       HazardSeverity
+  offsetLat      Float
+  offsetLon      Float
+  reportedAt     DateTime        @default(now())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  resolvedHazard ResolvedHazard?
+  tasks          Task[]
+}
+
+/// Live task — ranger currently enroute or freshly arrived. Mirrors RangerTask in tasks.ts.
+model Task {
+  id        String     @id @default(cuid())
+  hazardId  String
+  rangerId  String
+  status    TaskStatus @default(enroute)
+  unitLat   Float
+  unitLon   Float
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  hazard    Incident   @relation(fields: [hazardId], references: [id])
+  ranger    Personnel  @relation(fields: [rangerId], references: [id])
+}
+
+/// Permanent resolution record — "hazard X was handled by ranger Y". Mirrors ResolvedHazard in tasks.ts.
+model ResolvedHazard {
+  id         String    @id @default(cuid())
+  hazardId   String    @unique
+  rangerId   String
+  rangerName String
+  callsign   String
+  resolvedAt DateTime  @default(now())
+  hazard     Incident  @relation(fields: [hazardId], references: [id])
+  ranger     Personnel @relation(fields: [rangerId], references: [id])
+}
+
+/// Geotagged status message from personel. Mirrors MessagePin in messagePins.ts.
+model MessagePin {
+  id         String    @id @default(cuid())
+  rangerId   String
+  rangerName String
+  callsign   String
+  text       String
+  lat        Float
+  lon        Float
+  createdAt  DateTime  @default(now())
+  ranger     Personnel @relation(fields: [rangerId], references: [id])
+}
+
+/// Radio/comms log entry. Mirrors CommEntry in commsLog.ts.
+model CommsEntry {
+  id        String   @id @default(cuid())
+  sender    String
+  color     String
+  lead      String
+  body      String
+  time      String
+  createdAt DateTime @default(now())
+}
+
+/// Confirmed evacuation point — radar-accepted safe zone. Mirrors EvacuationPoint in evacuationPoints.ts.
+model EvacuationPoint {
+  id         String    @id @default(cuid())
+  rangerId   String
+  rangerName String
+  callsign   String
+  lat        Float
+  lon        Float
+  createdAt  DateTime  @default(now())
+  ranger     Personnel @relation(fields: [rangerId], references: [id])
+}
+
+/// Pending evacuation request from personel, awaiting radar accept/reject. Mirrors EvacuationPingRequest in evacuationRequests.ts.
+model EvacuationRequest {
+  id          String   @id @default(cuid())
+  rangerId    String
+  rangerName  String
+  callsign    String
+  atLat       Float
+  atLon       Float
+  incidentLat Float
+  incidentLon Float
+  accepted    Boolean?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+/// Major incident (FLARE) declaration. Mirrors FlareState in flare.ts.
+model FlareAlert {
+  id         String          @id @default(cuid())
+  status     FlareStatus     @default(active)
+  sequence   Int             @default(1)
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+  dispatches FlareDispatch[]
+}
+
+/// Individual unit dispatched during a FLARE alert.
+model FlareDispatch {
+  id        String     @id @default(cuid())
+  flareId   String
+  rangerId  String
+  createdAt DateTime   @default(now())
+  flare     FlareAlert @relation(fields: [flareId], references: [id])
+  ranger    Personnel  @relation(fields: [rangerId], references: [id])
+}
 
 enum HazardKind {
   fire
@@ -31,153 +158,4 @@ enum TaskStatus {
 enum FlareStatus {
   active
   calm
-}
-
-// ─── Models ───────────────────────────────────────────────────────────────────
-
-/// Ranger / field personel. Matches src/lib/rangers.ts Ranger interface.
-model Personnel {
-  id        String @id @default(cuid())
-  name      String
-  callsign  String
-  offsetLat Float
-  offsetLon Float
-
-  tasks            Task[]
-  resolvedHazards  ResolvedHazard[]
-  messagePins      MessagePin[]
-  evacuationPoints EvacuationPoint[]
-  flareDispatches  FlareDispatch[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/// Incident / hazard report. Matches src/lib/hazards.ts HazardData interface.
-model Incident {
-  id          String         @id @default(cuid())
-  kind        HazardKind
-  label       String
-  description String
-  severity    HazardSeverity
-  offsetLat   Float
-  offsetLon   Float
-  reportedAt  DateTime       @default(now())
-
-  tasks          Task[]
-  resolvedHazard ResolvedHazard?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/// Live task — ranger currently enroute or freshly arrived. Mirrors RangerTask in tasks.ts.
-model Task {
-  id       String     @id @default(cuid())
-  hazardId String
-  rangerId String
-  status   TaskStatus @default(enroute)
-  unitLat  Float
-  unitLon  Float
-
-  hazard Incident  @relation(fields: [hazardId], references: [id])
-  ranger Personnel @relation(fields: [rangerId], references: [id])
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/// Permanent resolution record — "hazard X was handled by ranger Y". Mirrors ResolvedHazard in tasks.ts.
-model ResolvedHazard {
-  id         String @id @default(cuid())
-  hazardId   String @unique
-  rangerId   String
-  rangerName String
-  callsign   String
-
-  hazard Incident  @relation(fields: [hazardId], references: [id])
-  ranger Personnel @relation(fields: [rangerId], references: [id])
-
-  resolvedAt DateTime @default(now())
-}
-
-/// Geotagged status message from personel. Mirrors MessagePin in messagePins.ts.
-model MessagePin {
-  id         String @id @default(cuid())
-  rangerId   String
-  rangerName String
-  callsign   String
-  text       String
-  lat        Float
-  lon        Float
-
-  ranger Personnel @relation(fields: [rangerId], references: [id])
-
-  createdAt DateTime @default(now())
-}
-
-/// Radio/comms log entry. Mirrors CommEntry in commsLog.ts.
-model CommsEntry {
-  id     String @id @default(cuid())
-  sender String
-  color  String
-  lead   String
-  body   String
-  time   String
-
-  createdAt DateTime @default(now())
-}
-
-/// Confirmed evacuation point — radar-accepted safe zone. Mirrors EvacuationPoint in evacuationPoints.ts.
-model EvacuationPoint {
-  id         String @id @default(cuid())
-  rangerId   String
-  rangerName String
-  callsign   String
-  lat        Float
-  lon        Float
-
-  ranger Personnel @relation(fields: [rangerId], references: [id])
-
-  createdAt DateTime @default(now())
-}
-
-/// Pending evacuation request from personel, awaiting radar accept/reject. Mirrors EvacuationPingRequest in evacuationRequests.ts.
-model EvacuationRequest {
-  id          String   @id @default(cuid())
-  rangerId    String
-  rangerName  String
-  callsign    String
-  atLat       Float
-  atLon       Float
-  incidentLat Float
-  incidentLon Float
-  accepted    Boolean?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/// Major incident (FLARE) declaration. Mirrors FlareState in flare.ts.
-model FlareAlert {
-  id       String      @id @default(cuid())
-  status   FlareStatus @default(active)
-  sequence Int         @default(1)
-
-  dispatches FlareDispatch[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-/// Individual unit dispatched during a FLARE alert.
-model FlareDispatch {
-  id       String @id @default(cuid())
-  flareId  String
-  rangerId String
-
-  flare  FlareAlert @relation(fields: [flareId], references: [id])
-  ranger Personnel  @relation(fields: [rangerId], references: [id])
-
-  createdAt DateTime @default(now())
 }
