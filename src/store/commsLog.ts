@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { commsApi } from "@/lib/api";
+import { socket } from "@/lib/socket";
 
 export interface CommEntry {
   time: string;
@@ -10,7 +12,9 @@ export interface CommEntry {
 
 interface CommsLogState {
   entries: CommEntry[];
+  loaded: boolean;
   append: (entry: Omit<CommEntry, "time">) => void;
+  loadHistory: () => Promise<void>;
 }
 
 function formatNow() {
@@ -19,44 +23,45 @@ function formatNow() {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-const INITIAL_LOG: CommEntry[] = [
-  {
-    time: "08:45:12",
-    sender: "PUSAT",
-    color: "#66df75",
-    lead: "PEMBARUAN",
-    body: "data satelit selesai.",
-  },
-  {
-    time: "08:44:05",
-    sender: "TIM BRAVO",
-    color: "#e5e2e1",
-    lead: "POSISI DI",
-    body: "Koor 06°13'S. Menunggu instruksi.",
-  },
-  {
-    time: "08:40:22",
-    sender: "SISTEM",
-    color: "#ff0040",
-    lead: "DETEKSI",
-    body: "anomali suhu di Sektor Utara.",
-  },
-  {
-    time: "08:35:10",
-    sender: "TIM ALPHA",
-    color: "#e5e2e1",
-    lead: "SELESAI",
-    body: "menyisir area perumahan. Negatif korban.",
-  },
-];
-
 /**
- * Global comms log — shared so the FLARE sequence (tactical map) can post
- * dispatch/status updates that show up in the Comm Center panel, same as a
- * real radio log would, instead of each component keeping its own copy.
+ * Global comms log — loads history from API on first call, then stays live
+ * via the comms-message Socket.IO event.
  */
-export const useCommsLogStore = create<CommsLogState>((set) => ({
-  entries: INITIAL_LOG,
-  append: (entry) =>
-    set((s) => ({ entries: [...s.entries, { ...entry, time: formatNow() }] })),
-}));
+export const useCommsLogStore = create<CommsLogState>((set, get) => {
+  // Subscribe to real-time comms events from backend
+  socket.on("comms-message", (entry: CommEntry) => {
+    // De-dupe: don't re-add entries that came back as echoes of our own POST
+    const exists = get().entries.some(
+      (e) => e.time === entry.time && e.sender === entry.sender && e.body === entry.body,
+    );
+    if (!exists) set((s) => ({ entries: [...s.entries, entry] }));
+  });
+
+  return {
+    entries: [],
+    loaded: false,
+
+    loadHistory: async () => {
+      if (get().loaded) return;
+      try {
+        const history: CommEntry[] = await commsApi.history();
+        set({ entries: history, loaded: true });
+      } catch (err) {
+        console.warn("[commsLog] Failed to load history from API:", err);
+        // Fallback to static initial log so UI isn't empty
+        set({
+          loaded: true,
+          entries: [
+            { time: "08:45:12", sender: "PUSAT",     color: "#66df75", lead: "PEMBARUAN", body: "data satelit selesai." },
+            { time: "08:44:05", sender: "TIM BRAVO", color: "#e5e2e1", lead: "POSISI DI", body: "Koor 06°13'S. Menunggu instruksi." },
+            { time: "08:40:22", sender: "SISTEM",    color: "#ff0040", lead: "DETEKSI",   body: "anomali suhu di Sektor Utara." },
+            { time: "08:35:10", sender: "TIM ALPHA", color: "#e5e2e1", lead: "SELESAI",   body: "menyisir area perumahan. Negatif korban." },
+          ],
+        });
+      }
+    },
+
+    append: (entry) =>
+      set((s) => ({ entries: [...s.entries, { ...entry, time: formatNow() }] })),
+  };
+});

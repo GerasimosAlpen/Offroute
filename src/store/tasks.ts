@@ -9,6 +9,7 @@ import {
   animateRouteReveal,
   simulatedTravelDurationMs,
 } from "@/lib/routing";
+import { tasksApi } from "@/lib/api";
 import { useCommsLogStore } from "./commsLog";
 import { useMessagePinsStore } from "./messagePins";
 
@@ -20,6 +21,8 @@ export interface RangerTask {
   /** Live, smoothly-interpolated position. */
   unitPos: [number, number];
   status: "enroute" | "arrived";
+  /** Backend task ID for status/position updates */
+  backendId?: string;
 }
 
 export interface ResolvedHazard {
@@ -29,42 +32,13 @@ export interface ResolvedHazard {
 }
 
 interface TasksState {
-  /**
-   * Keyed by hazardId — only the *live* task, while a ranger is actually
-   * enroute or freshly arrived. Cleared once that ranger picks up a new
-   * task elsewhere, so their marker doesn't keep showing at a place they've
-   * left — see `resolvedHazards` for the permanent "this got handled"
-   * record that survives that cleanup.
-   */
   tasks: Record<string, RangerTask>;
-  /** Permanent — "hazard X was resolved by ranger Y," even after Y has since moved on to something else. */
   resolvedHazards: Record<string, ResolvedHazard>;
-  /**
-   * Wherever each ranger last actually was, updated continuously while
-   * enroute and pinned on arrival — so their *next* task starts from where
-   * they really are, not their original static home position. Only what
-   * doesn't fit on `RangerTask` because it needs to outlive any one task.
-   */
   rangerLastKnownPos: Record<string, [number, number]>;
-  /**
-   * Ad-hoc version of the FLARE sequence's own dispatch: pick the nearest
-   * free ranger, get a real route, glide them there, have them report in
-   * (logged + pinned on the map) on arrival. Works for any hazard, not just
-   * the earthquake drill — this is what "Budi takes the crash task" is.
-   */
   assign: (hazardId: string, base: { lat: number; lon: number }) => Promise<void>;
-  /**
-   * FLARE's own dispatch sequence used to compute ranger positions from
-   * their static home offset too, completely ignoring this store — so a
-   * ranger who'd already moved via an ad-hoc task would "reset" to their
-   * original spot the moment a FLARE fired. This is how FlareSequence keeps
-   * this store updated as its own dispatched unit moves, so the two systems
-   * agree on where everyone actually is.
-   */
   setRangerPosition: (rangerId: string, pos: [number, number]) => void;
 }
 
-/** Wherever a ranger actually is, falling back to their static home offset if they've never moved. */
 export function getRangerPosition(rangerId: string, fallback: [number, number]): [number, number] {
   return useTasksStore.getState().rangerLastKnownPos[rangerId] ?? fallback;
 }
@@ -78,16 +52,11 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     set((s) => ({ rangerLastKnownPos: { ...s.rangerLastKnownPos, [rangerId]: pos } })),
 
   assign: async (hazardId, base) => {
-    // Already being worked, or already resolved — either way, not up for grabs.
     if (get().tasks[hazardId]?.status === "enroute" || get().resolvedHazards[hazardId]) return;
 
     const hazard = HAZARDS.find((h) => h.id === hazardId);
     if (!hazard) return;
 
-    // Only rangers currently *enroute* elsewhere are actually unavailable —
-    // ones who already arrived and reported are free again. (Bug fixed:
-    // this used to count every ranger who'd EVER completed a task as
-    // permanently busy, since it didn't filter by status at all.)
     const busyRangerIds = new Set(
       Object.values(get().tasks)
         .filter((t) => t.status === "enroute")
@@ -98,10 +67,6 @@ export const useTasksStore = create<TasksState>((set, get) => ({
 
     const target: [number, number] = [base.lat + hazard.offset[0], base.lon + hazard.offset[1]];
 
-    // Start from wherever this ranger actually last was, not their static
-    // home offset. (Bug fixed: this used to always recompute from
-    // `base + ranger.offset`, so a ranger who'd already moved would
-    // teleport back to their original spot for every new task.)
     const posOf = (r: Ranger): [number, number] =>
       get().rangerLastKnownPos[r.id] ?? [base.lat + r.offset[0], base.lon + r.offset[1]];
 
@@ -125,10 +90,6 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     });
 
     set((s) => {
-      // Drop any previous *completed* task this ranger left behind so their
-      // old "arrived" marker doesn't keep showing at a place they're no
-      // longer at — the message pin from that visit stays as history,
-      // this is just the live position marker.
       const tasks = { ...s.tasks };
       for (const [key, t] of Object.entries(tasks)) {
         if (t.rangerId === nearest.id && t.status === "arrived") delete tasks[key];
@@ -137,13 +98,23 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       return { tasks, rangerLastKnownPos: { ...s.rangerLastKnownPos, [nearest.id]: start } };
     });
 
+    // Persist assignment to backend (fire-and-forget — animation continues locally)
+    tasksApi
+      .assign({ hazardId, baseLat: base.lat, baseLon: base.lon })
+      .then((savedTask) => {
+        // Store backend ID for later status update
+        set((s) => {
+          const t = s.tasks[hazardId];
+          if (!t) return s;
+          return { tasks: { ...s.tasks, [hazardId]: { ...t, backendId: savedTask.id } } };
+        });
+      })
+      .catch((err) => console.warn("[tasks] Failed to persist assign:", err));
+
     const route = (await fetchRoadRoute(start, target)) ?? buildFallbackRoute(start, target);
 
-    // The task may have been cleared while we were waiting on the route.
     if (!get().tasks[hazardId]) return;
 
-    // Draw the route from start to end instead of it just appearing — the
-    // ranger's own marker leads the tip, like it's scouting the path live.
     await animateRouteReveal(
       route,
       900,
@@ -177,11 +148,9 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     );
 
     const finalTask = get().tasks[hazardId];
-    if (!finalTask) return; // cleared mid-flight
+    if (!finalTask) return;
 
     set((s) => ({
-      // Route cleared on arrival — it's done its job, no need to keep the
-      // bright animated line drawn once the ranger's actually there.
       tasks: { ...s.tasks, [hazardId]: { ...finalTask, route: [], unitPos: target, status: "arrived" } },
       resolvedHazards: {
         ...s.resolvedHazards,
@@ -189,6 +158,17 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       },
       rangerLastKnownPos: { ...s.rangerLastKnownPos, [nearest.id]: target },
     }));
+
+    // Persist "arrived" status to backend
+    if (finalTask.backendId) {
+      tasksApi
+        .updateStatus(finalTask.backendId, {
+          status: "arrived",
+          unitLat: target[0],
+          unitLon: target[1],
+        })
+        .catch((err) => console.warn("[tasks] Failed to persist arrived status:", err));
+    }
 
     const reportText = arrivalReportFor(hazard);
     log({ sender: nearest.name, color: "#5fb3b3", lead: "TIBA", body: reportText });
