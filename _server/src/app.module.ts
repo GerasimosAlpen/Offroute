@@ -12,6 +12,7 @@ import { MessagesModule } from "./messages/messages.module";
 import { CommsModule } from "./comms/comms.module";
 import { VictimsModule } from "./victims/victims.module";
 import { AdminModule } from "./admin/admin.module";
+import { ProxyModule } from "./proxy/proxy.module";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { AdminModule } from "./admin/admin.module";
     CommsModule,
     VictimsModule,
     AdminModule,
+    ProxyModule,
   ],
   controllers: [AppController],
   providers: [AppService],

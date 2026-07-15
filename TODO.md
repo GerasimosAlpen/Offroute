@@ -18,6 +18,43 @@ not as a statement of current reality.
 
 # Backend (NestJS)
 
+## Radar-as-OS + in-app browser (2026-07-15)
+
+Pushed the radar's desktop metaphor hard, and gave it a real embedded browser.
+
+- **OS window chrome.** `FloatingWindow` now has a proper title bar (app icon +
+  name + minimize + maximize/restore), **maximize/full-screen** (double-click
+  title too), **8-direction resize**, active-window focus ring + shadow, and
+  **framer-motion animations for every action** — pop-in on open/restore,
+  shrink-fade on minimize, and a smooth CSS tween for maximize/tile/snap
+  (instant while dragging). `useWindowLayout` gained `maximized`, `tile`,
+  `cascade`, `isTop`.
+- **OS taskbar.** `WindowTaskbar` is now a real taskbar: a **Start/launcher
+  menu** (open apps, jump to Monitor/Terminal pages, Tile/Cascade/Reset
+  layout — animated popover), running-window buttons, and a **system tray**
+  (`SystemTray`: live clock/date, connectivity, realtime + unit indicators).
+- **In-OS browser (`Peramban`).** A launchable window that renders web pages
+  **inside** the radar via a new backend proxy (`_server/src/proxy`,
+  `GET /proxy?url=`) which strips `X-Frame-Options`/framing-CSP and rewrites
+  `<a>`/`<form>` targets so navigation stays inside the frame; assets resolve
+  via an injected `<base>`. Address bar, back/forward/reload, bookmarks. The
+  iframe is sandboxed **without** `allow-same-origin` so proxied page scripts
+  can't reach our backend; SSRF-guarded (blocks localhost/LAN); friendly
+  in-frame HTML on failure. CSP gained `frame-src 'self' http://localhost:3000`.
+  **Verified live**: Wikipedia + example.com render through the proxy with
+  links rewritten; blocked hosts return the friendly error page.
+- **Real in-app browser window for the heavy web.** Proxies fundamentally
+  can't render Google/YouTube (anti-framing, JS, DRM), so the Browser now
+  also has a **real webview window** (`open_browser_window` in control.rs —
+  a full Tauri webview, Offroute's own window, not the system browser) that
+  reaches anything. Split model: lightweight framable sites (Wikipedia, BMKG,
+  OSM) render **inline** via the proxy; **Google, YouTube, search, and any
+  JS-heavy site open in the real in-app window**. Search goes to Google there
+  (dropped the Wikipedia results page as the "search engine"). Each mode is
+  labelled; an `AppWindow` toolbar button pops the current inline page into
+  the real window. Rust compiles; the webview-window creation itself needs a
+  live `tauri dev` run to confirm (can't exercise the engine headlessly).
+
 ## Control console: terminal, data reset, app control (2026-07-15)
 
 Turned the System Monitor into a control center, and added a real Linux-style

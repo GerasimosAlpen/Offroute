@@ -24,7 +24,6 @@ export function WindowTaskbar({ windows }: { windows: TaskbarWindow[] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const minimized = useWindowLayout((s) => s.minimized);
   const restore = useWindowLayout((s) => s.restore);
-  const focus = useWindowLayout((s) => s.focus);
   const minimize = useWindowLayout((s) => s.minimize);
   const cascade = useWindowLayout((s) => s.cascade);
   const tile = useWindowLayout((s) => s.tile);

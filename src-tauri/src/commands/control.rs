@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 /// Restart the Offroute app itself. This is deliberately an *app* restart,
 /// not an OS reboot: rebooting the operator's machine mid-operation would be
@@ -15,6 +15,34 @@ pub fn restart_app(app: AppHandle) {
 #[tauri::command]
 pub fn quit_app(app: AppHandle) {
     app.exit(0);
+}
+
+const BROWSER_LABEL: &str = "radar-browser";
+
+/// Open (or navigate) a REAL in-app browser window — a full webview engine,
+/// so Google, YouTube and other JS-heavy/anti-framing sites that an iframe
+/// proxy can never render all work. It's Offroute's own window (not the
+/// system browser) and reuses a single "radar-browser" window. The loaded
+/// remote page gets no Tauri IPC, so it's just a browser tab.
+#[tauri::command]
+pub async fn open_browser_window(app: AppHandle, url: String) -> Result<(), String> {
+    let parsed: Url = url.parse().map_err(|_| "URL tidak valid".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("Hanya http/https yang diizinkan".to_string());
+    }
+
+    if let Some(win) = app.get_webview_window(BROWSER_LABEL) {
+        win.navigate(parsed).map_err(|e| e.to_string())?;
+        let _ = win.set_focus();
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(&app, BROWSER_LABEL, WebviewUrl::External(parsed))
+        .title("Radar Browser")
+        .inner_size(1100.0, 780.0)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Best-effort human "Downloads" location, falling back to the OS-provided

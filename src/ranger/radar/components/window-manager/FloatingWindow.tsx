@@ -1,4 +1,4 @@
-import { useRef, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import type { ComponentChildren } from "preact";
 import { motion, AnimatePresence } from "framer-motion";
 import { Minus, Square, Copy, type LucideIcon } from "lucide-preact";
@@ -41,6 +41,21 @@ export function FloatingWindow({ id, title, defaultRect, icon: Icon, children }:
   // lag — so the smooth CSS transition (used for maximize/tile/snap) is
   // switched off during direct manipulation.
   const [interacting, setInteracting] = useState(false);
+
+  // Suppress text selection across the whole app while a window is being
+  // dragged or resized — otherwise the drag highlights map labels, panel
+  // text, etc. Restored the instant the pointer is released.
+  useEffect(() => {
+    if (!interacting) return;
+    const body = document.body.style;
+    const prev = body.userSelect;
+    body.userSelect = "none";
+    (body as unknown as { webkitUserSelect: string }).webkitUserSelect = "none";
+    return () => {
+      body.userSelect = prev;
+      (body as unknown as { webkitUserSelect: string }).webkitUserSelect = prev;
+    };
+  }, [interacting]);
 
   const getContainerRect = (): DOMRect | null => {
     const container = rootRef.current?.offsetParent as HTMLElement | null;

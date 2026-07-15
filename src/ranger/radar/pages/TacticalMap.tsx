@@ -18,7 +18,7 @@ const TASKBAR_WINDOWS: TaskbarWindow[] = [
   { id: "status", title: "Status Taktis", icon: TriangleAlert },
   { id: "personnel", title: "Status Personel", icon: Users },
   { id: "comms", title: "Comm Center", icon: MessageSquare },
-  { id: "browser", title: "Peramban", icon: Globe },
+  { id: "browser", title: "Browser", icon: Globe },
 ];
 
 // Default layout — mirrors the previous fixed 8/4 grid split as fractions.
@@ -93,7 +93,7 @@ export function TacticalMap() {
           <FloatingWindow id="comms" title="Comm Center" icon={MessageSquare} defaultRect={DEFAULT_RECTS.comms}>
             <CommsLogPanel />
           </FloatingWindow>
-          <FloatingWindow id="browser" title="Peramban" icon={Globe} defaultRect={DEFAULT_RECTS.browser}>
+          <FloatingWindow id="browser" title="Browser" icon={Globe} defaultRect={DEFAULT_RECTS.browser}>
             <WebBrowserPanel />
           </FloatingWindow>
           <SnapOverlay />

@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; connect-src ipc: http://ipc.localhost http://localhost:3000 ws://localhost:3000 https://nominatim.openstreetmap.org https://data.bmkg.go.id https://router.project-osrm.org https://ipwho.is https://ipapi.co"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; frame-src 'self' http://localhost:3000; connect-src ipc: http://ipc.localhost http://localhost:3000 ws://localhost:3000 https://nominatim.openstreetmap.org https://data.bmkg.go.id https://router.project-osrm.org https://ipwho.is https://ipapi.co"
     }
   },
   "bundle": {
