@@ -6,7 +6,8 @@ export interface EventMarker {
   label: string;
   pos: [number, number];
   distance: string;
-  affected: number;
+  /** Live incidents don't carry a casualty count yet — undefined renders as "—", never a made-up number. */
+  affected?: number;
 }
 
 export const DANGER_COLORS: Record<string, { border: string; bg: string; text: string; glow: string }> = {

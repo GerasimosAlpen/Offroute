@@ -1,7 +1,7 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { MapContainer, TileLayer, Marker, Polyline } from "react-leaflet";
-import { Compass, X, Flame, Loader2, Check, Navigation } from "lucide-preact";
-import { motion, AnimatePresence } from "framer-motion";
+import { Compass, Flame } from "lucide-preact";
+import { AnimatePresence } from "framer-motion";
 
 import { useDeviceLocation } from "@/store/location";
 import { useDeviceHeading, startHeadingWatch } from "@/store/heading";
@@ -15,6 +15,10 @@ import { IntroSequence } from "../components/peta-taktis/IntroSequence";
 import { LiveFollow } from "../components/peta-taktis/LiveFollow";
 import { RouteSearchSequence, type SearchParams } from "../components/peta-taktis/RouteSearchSequence";
 import { EventPopup } from "../components/peta-taktis/EventPopup";
+import { SearchHud } from "../components/peta-taktis/SearchHud";
+import { NavBanner } from "../components/peta-taktis/NavBanner";
+import { hazardsToEventMarkers } from "../components/peta-taktis/events";
+import { useIncidents } from "@/hooks/useIncidents";
 import { VictimSosDrawer } from "../components/VictimSosDrawer";
 import type { EventMarker } from "../components/peta-taktis/types";
 
@@ -65,48 +69,12 @@ export function PetaTaktis() {
   }, [coords, startPos]);
   const anchorPos = startPos ?? userPos;
 
-  const EVENTS: EventMarker[] = [
-    {
-      id: "EVT-001",
-      name: "Kebakaran Gedung Kantor",
-      type: "KEBAKARAN",
-      danger: "KRITIS",
-      label: "KODE MERAH: API",
-      pos: [anchorPos[0] + 0.003, anchorPos[1] - 0.004],
-      distance: "0.8 KM",
-      affected: 37,
-    },
-    {
-      id: "EVT-002",
-      name: "Longsor Jalur Evakuasi",
-      type: "BENCANA",
-      danger: "TINGGI",
-      label: "JALUR PUTUS",
-      pos: [anchorPos[0] - 0.005, anchorPos[1] + 0.006],
-      distance: "1.4 KM",
-      affected: 12,
-    },
-    {
-      id: "EVT-003",
-      name: "Korban Luka Berat",
-      type: "MEDIS",
-      danger: "TINGGI",
-      label: "DARURAT MEDIS",
-      pos: [anchorPos[0] - 0.002, anchorPos[1] - 0.003],
-      distance: "0.5 KM",
-      affected: 3,
-    },
-    {
-      id: "EVT-004",
-      name: "Kerusuhan Warga",
-      type: "KEAMANAN",
-      danger: "SEDANG",
-      label: "POSKO AMAN",
-      pos: [anchorPos[0] + 0.001, anchorPos[1] + 0.002],
-      distance: "0.3 KM",
-      affected: 80,
-    },
-  ];
+  // Live shared incident feed — the same hazards radar sees, offline-cached.
+  const { data: hazards = [] } = useIncidents();
+  const EVENTS: EventMarker[] = useMemo(
+    () => hazardsToEventMarkers(hazards, anchorPos),
+    [hazards, anchorPos[0], anchorPos[1]],
+  );
 
   const handleSelectEvent = (event: EventMarker) => {
     if (selectedEvent?.id === event.id) {
@@ -179,97 +147,18 @@ export function PetaTaktis() {
       {/* Route search HUD (while searching) / final nav banner (once resolved) */}
       <AnimatePresence mode="wait">
         {searching ? (
-          <motion.div
-            key="searching"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden bg-[#0a0a0a] border-b border-[#66df75]/40"
-          >
-            <div className="px-4 py-2 flex items-center gap-2">
-              <Loader2 size={12} className="animate-spin text-[#66df75] shrink-0" />
-              <span className="font-mono text-[10px] font-bold text-[#66df75] uppercase tracking-wide truncate">
-                {searchLabel}
-              </span>
-            </div>
-
-            {searchParams && (
-              <div className="px-4 pb-2 grid grid-cols-4 gap-2 font-mono text-[9px]">
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[#555]">JARAK</span>
-                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.distanceKm.toFixed(2)} KM</span>
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[#555]">WAKTU</span>
-                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.timeMin} MNT</span>
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[#555]">RISIKO</span>
-                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.risk}%</span>
-                </div>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[#555]">MEDAN</span>
-                  <span className="text-[#e5e2e1] font-bold truncate">{searchParams.terrain}</span>
-                </div>
-              </div>
-            )}
-
-            {scenarioLog.length > 0 && (
-              <div className="px-4 pb-2 flex flex-col gap-1 font-mono text-[9px] max-h-24 overflow-y-auto">
-                {scenarioLog.map((s, i) => (
-                  <motion.div
-                    key={i}
-                    initial={{ opacity: 0, x: -8 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="flex items-center gap-1.5"
-                  >
-                    <Check size={10} className="text-[#66df75] shrink-0" />
-                    <span className="text-[#666] truncate">{s.label}</span>
-                    <span className="text-[#66df75] ml-auto shrink-0 truncate">{s.result}</span>
-                  </motion.div>
-                ))}
-              </div>
-            )}
-
-            <div className="h-[3px] bg-[#1a1a1a]">
-              <motion.div
-                className="h-full bg-[#66df75]"
-                animate={{ width: `${searchProgress * 100}%` }}
-                transition={{ ease: "linear", duration: 0.25 }}
-              />
-            </div>
-          </motion.div>
+          <SearchHud
+            label={searchLabel}
+            params={searchParams}
+            scenarioLog={scenarioLog}
+            progress={searchProgress}
+          />
         ) : navActive ? (
-          <motion.div
-            key="active"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
-          >
-            <div
-              className="px-4 py-2 flex items-center justify-between border-b"
-              style={{ background: `${NAV_COLOR}15`, borderColor: NAV_COLOR }}
-            >
-              <div className="flex items-center gap-2">
-                <Navigation size={12} style={{ color: NAV_COLOR } as any} />
-                <span className="font-mono text-[10px] font-bold" style={{ color: NAV_COLOR }}>
-                  NAVIGASI AKTIF
-                </span>
-                {activeRouteInfo && (
-                  <span className="font-mono text-[9px] text-[#555]">
-                    {activeRouteInfo.timeMin} mnt · {activeRouteInfo.distanceKm.toFixed(1)} km
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={handleClearRoute}
-                className="text-[#555] hover:text-[#e1bec2]"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          </motion.div>
+          <NavBanner
+            color={NAV_COLOR}
+            routeInfo={activeRouteInfo}
+            onClear={handleClearRoute}
+          />
         ) : null}
       </AnimatePresence>
 

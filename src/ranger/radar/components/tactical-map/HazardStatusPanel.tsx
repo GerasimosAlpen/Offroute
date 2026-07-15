@@ -1,5 +1,6 @@
 import { TriangleAlert } from "lucide-preact";
 import type { HazardSeverity } from "@/lib/hazards";
+import type { Ranger } from "@/lib/rangers";
 import { useTasksStore } from "@/store/tasks";
 import { useDeviceLocation } from "@/store/location";
 import { useIncidents } from "@/hooks/useIncidents";
@@ -16,6 +17,8 @@ export function HazardStatusPanel() {
   const tasks = useTasksStore((s) => s.tasks);
   const resolvedHazards = useTasksStore((s) => s.resolvedHazards);
   const assign = useTasksStore((s) => s.assign);
+  const confirmDone = useTasksStore((s) => s.confirmDone);
+  const rejectDone = useTasksStore((s) => s.rejectDone);
 
   // Live data from backend (falls back to static mocks while loading/offline)
   const { data: hazards = [] } = useIncidents();
@@ -56,32 +59,83 @@ export function HazardStatusPanel() {
               </div>
               <p className="text-[#e1bec2] text-xs leading-4">{hazard.description}</p>
 
-              {rangerProfile ? (
-                <p className="text-[#5fb3b3] text-xs pt-1 uppercase tracking-[0.5px]">
-                  {task
-                    ? task.status === "arrived"
-                      ? `${rangerProfile.name} (${rangerProfile.callsign}) tiba di lokasi`
-                      : `${rangerProfile.name} (${rangerProfile.callsign}) menuju lokasi...`
-                    : `Diselesaikan oleh ${rangerProfile.name} (${rangerProfile.callsign})`}
-                </p>
-              ) : (
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    className="border border-[#444] text-[#e5e2e1] text-xs uppercase px-2.5 py-1.5"
-                  >
-                    Detail
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!coords}
-                    onClick={() => coords && assign(hazard.id, coords)}
-                    className="border border-[#ff0040] bg-[#ff0040]/10 text-[#ff0040] text-xs uppercase px-2.5 py-1.5 disabled:opacity-40"
-                  >
-                    Kirim Unit
-                  </button>
-                </div>
-              )}
+              {(() => {
+                const who = rangerProfile
+                  ? `${rangerProfile.name} (${rangerProfile.callsign})`
+                  : task
+                    ? `${task.rangerName} (${task.callsign})`
+                    : resolved
+                      ? `${resolved.rangerName} (${resolved.callsign})`
+                      : "";
+
+                // Resolved — radar already confirmed this one.
+                if (resolved && !task) {
+                  return (
+                    <p className="text-[#66df75] text-xs pt-1 uppercase tracking-[0.5px]">
+                      Selesai · dikonfirmasi · {who}
+                    </p>
+                  );
+                }
+
+                // A unit reported done — radar must confirm or send back.
+                if (task?.status === "reported") {
+                  return (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <p className="text-[#fabd00] text-xs uppercase tracking-[0.5px]">
+                        {who} lapor selesai · perlu konfirmasi
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => confirmDone(hazard.id)}
+                          className="border border-[#66df75] bg-[#66df75]/10 text-[#66df75] text-xs uppercase px-2.5 py-1.5"
+                        >
+                          Konfirmasi
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => rejectDone(hazard.id)}
+                          className="border border-[#ff0040] bg-[#ff0040]/10 text-[#ff0040] text-xs uppercase px-2.5 py-1.5"
+                        >
+                          Kembalikan
+                        </button>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // A unit is enroute or on scene — no second unit, just status.
+                if (task) {
+                  const label =
+                    task.status === "onscene"
+                      ? `${who} di lokasi, menangani`
+                      : `${who} menuju lokasi...`;
+                  return (
+                    <p className="text-[#5fb3b3] text-xs pt-1 uppercase tracking-[0.5px]">
+                      {task.selfAssigned ? "MANDIRI · " : ""}{label}
+                    </p>
+                  );
+                }
+
+                // No unit yet — radar can dispatch.
+                return (
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={!coords}
+                      onClick={() =>
+                        coords &&
+                        assign(hazard.id, coords, {
+                          hazards,
+                          personnel: personnel as unknown as Ranger[],
+                        })}
+                      className="border border-[#ff0040] bg-[#ff0040]/10 text-[#ff0040] text-xs uppercase px-2.5 py-1.5 disabled:opacity-40"
+                    >
+                      Kirim Unit
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
           );
         })}

@@ -13,19 +13,17 @@ import { FocusableMarkers } from "./FocusableMarkers";
 import { TaskMarkers } from "./TaskMarkers";
 import { EvacuationPointMarkers } from "./EvacuationPointMarkers";
 import { VictimMarkers } from "./VictimMarkers";
+import { LivePersonnelMarkers } from "./LivePersonnelMarkers";
+import { MessagePinMarkers } from "./MessagePinMarkers";
 import { FollowRanger } from "./FollowRanger";
-// MessagePinMarkers removed per user request — radar map no longer shows personel status message pins.
+// MessagePinMarkers brought back for backup requests — a unit's "Minta
+// Backup" now drops a pulsing red pin so HQ sees where help is needed.
 import { FlareSequence, ACTIVE_DRILL_PHASES, type FlarePhase, type FlareProgress } from "./FlareSequence";
 import { MapControls } from "./MapControls";
 import { OpsHud } from "./OpsHud";
 import { ShockwaveRing } from "./ShockwaveRing";
+import { formatCoords } from "@/lib/format";
 import "@/lib/leaflet-setup";
-
-function formatKoor(lat: number, lon: number) {
-  const latHemi = lat >= 0 ? "N" : "S";
-  const lonHemi = lon >= 0 ? "E" : "W";
-  return `KOOR: ${Math.abs(lat).toFixed(4)}°${latHemi} ${Math.abs(lon).toFixed(4)}°${lonHemi}`;
-}
 
 const DEFAULT_MAGNITUDE = 6.2;
 
@@ -94,7 +92,7 @@ export function TacticalMapCanvas() {
           Grid Visual: Posisi Ranger
         </span>
         <span className="text-[#ffb2bd] text-sm tracking-[0.7px]">
-          {coords ? formatKoor(coords.lat, coords.lon) : "KOOR: —"}
+          {coords ? `KOOR: ${formatCoords(coords.lat, coords.lon)}` : "KOOR: —"}
         </span>
       </header>
 
@@ -122,6 +120,8 @@ export function TacticalMapCanvas() {
               <TaskMarkers />
               <EvacuationPointMarkers />
               <VictimMarkers />
+              <LivePersonnelMarkers />
+              <MessagePinMarkers />
 
               <FollowRanger lat={coords.lat} lon={coords.lon} enabled={phase === "idle"} />
               <FlareSequence

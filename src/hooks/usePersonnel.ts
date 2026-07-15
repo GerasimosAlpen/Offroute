@@ -7,7 +7,7 @@ import { RANGERS } from "@/lib/rangers";
  * Falls back to the static RANGERS constant if the API is unreachable.
  */
 export function usePersonnel() {
-  return useQuery<Personnel[]>({
+  return useQuery<Personnel[], Error, (Personnel & { offset: [number, number] })[]>({
     queryKey: ["personnel"],
     queryFn: personnelApi.list,
     // Adapt API shape to match the local Ranger interface used in components

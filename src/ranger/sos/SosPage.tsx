@@ -20,6 +20,13 @@ export default function SosPage() {
   const [active, setActive] = useState(false);
   const [name, setName] = useState("");
   const beaconTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The re-beacon interval outlives the render it was created in — read the
+  // latest GPS fix and name through refs so a moving victim broadcasts where
+  // they are now, not where they stood when they tapped the button.
+  const coordsRef = useRef(coords);
+  coordsRef.current = coords;
+  const nameRef = useRef(name);
+  nameRef.current = name;
 
   useEffect(() => {
     return () => {
@@ -33,16 +40,17 @@ export default function SosPage() {
     if (beaconTimer.current) clearInterval(beaconTimer.current);
     beaconTimer.current = setInterval(() => {
       const latest = useSosStore.getState();
-      if (coords) void latest.send(coords.lat, coords.lon, name);
+      const pos = coordsRef.current;
+      if (pos) void latest.send(pos.lat, pos.lon, nameRef.current);
     }, REBEACON_MS);
   };
 
   const gpsReady = gpsStatus === "ready" || gpsStatus === "cached";
 
   return (
-    <div className="h-screen w-screen bg-black flex flex-col items-center justify-center gap-6 p-6 font-mono text-center">
+    <div className="min-h-dvh w-screen bg-black flex flex-col items-center justify-center gap-6 p-6 font-mono text-center">
       {!online && (
-        <div className="fixed top-0 inset-x-0 flex items-center justify-center gap-2 bg-[#93000a]/30 border-b border-[#FF0040]/50 text-[#ff8fa3] text-xs uppercase tracking-wide py-2">
+        <div className="fixed top-0 inset-x-0 flex items-center justify-center gap-2 bg-[#93000a]/30 border-b border-[#FF0040]/50 text-[#ff8fa3] text-[11px] sm:text-xs uppercase tracking-wide px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 z-10">
           <WifiOff size={12} /> Tidak ada koneksi — lokasi akan terkirim otomatis saat sinyal kembali
         </div>
       )}

@@ -1,8 +1,8 @@
 import { useState } from "preact/hooks";
 import { RadarPageShell } from "../components/RadarPageShell";
 import { MapPin, Camera, Send, Flame, Construction, HeartPulse, CarFront, ShieldAlert, ChevronDown, ChevronUp } from "lucide-preact";
-import { incidentsApi, type CreateIncidentDto } from "@/lib/api";
-import { useIncidents } from "@/hooks/useIncidents";
+import { type CreateIncidentDto } from "@/lib/api";
+import { useIncidents, submitIncident } from "@/hooks/useIncidents";
 import type { HazardKind, HazardSeverity } from "@/lib/hazards";
 
 // Uses the same HazardKind taxonomy as everywhere else in the app (the
@@ -61,11 +61,14 @@ export function LaporIncident() {
         offsetLat: 0,
         offsetLon: 0,
       };
-      await incidentsApi.create(dto);
+      const result = await submitIncident(dto);
       setType(null);
       setExplanation("");
       setLocation("");
       setUrgency("SEDANG");
+      if (result === "queued") {
+        setSubmitError("Offline — laporan tersimpan, terkirim otomatis saat koneksi kembali.");
+      }
     } catch (err) {
       console.warn("[LaporIncident] Failed to submit report:", err);
       setSubmitError("Gagal mengirim laporan — coba lagi.");

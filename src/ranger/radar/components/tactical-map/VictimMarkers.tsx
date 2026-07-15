@@ -4,13 +4,7 @@ import { useVictimsStore } from "@/store/victims";
 import { RANGERS } from "@/lib/rangers";
 import type { Victim } from "@/lib/api";
 import { buildSosIcon } from "./mapIcons";
-
-function formatAgo(iso: string): string {
-  const secs = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (secs < 60) return `${secs} detik lalu`;
-  const mins = Math.floor(secs / 60);
-  return `${mins} menit lalu`;
-}
+import { formatRelativeAge } from "@/lib/format";
 
 function VictimPopupBody({ victim }: { victim: Victim }) {
   const [pickedRanger, setPickedRanger] = useState(RANGERS[0].id);
@@ -21,7 +15,7 @@ function VictimPopupBody({ victim }: { victim: Victim }) {
       <div className="flex flex-col gap-1">
         <span className="font-bold text-[#131313]">{victim.label || "Tidak dikenal"}</span>
         <span>Sinyal SOS aktif dari lokasi ini.</span>
-        <span className="text-[10px] text-zinc-500">Terakhir lapor {formatAgo(victim.lastSeenAt)}</span>
+        <span className="text-[10px] text-zinc-500">Terakhir lapor {formatRelativeAge(new Date(victim.lastSeenAt).getTime())}</span>
         {victim.assignedRangerId && (
           <span className="text-[10px] text-sky-600">
             Menuju: {victim.assignedRangerName} ({victim.assignedCallsign})

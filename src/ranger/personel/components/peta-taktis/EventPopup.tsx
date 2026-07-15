@@ -58,7 +58,7 @@ export function EventPopup({
         </div>
         <div className="flex justify-between">
           <span className="text-[#555]">TERDAMPAK:</span>
-          <span className="text-[#e5e2e1]">{event.affected} orang</span>
+          <span className="text-[#e5e2e1]">{event.affected !== undefined ? `${event.affected} orang` : "—"}</span>
         </div>
       </div>
 

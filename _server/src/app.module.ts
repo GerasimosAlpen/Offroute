@@ -11,6 +11,7 @@ import { EvacuationModule } from "./evacuation/evacuation.module";
 import { MessagesModule } from "./messages/messages.module";
 import { CommsModule } from "./comms/comms.module";
 import { VictimsModule } from "./victims/victims.module";
+import { AdminModule } from "./admin/admin.module";
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { VictimsModule } from "./victims/victims.module";
     MessagesModule,
     CommsModule,
     VictimsModule,
+    AdminModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,37 +1,41 @@
 import { useState } from "preact/hooks";
 import { motion, AnimatePresence } from "framer-motion";
-import { AlertTriangle, Flame, Droplets, Car, AlertCircle, Send, MapPin, Clock, ChevronRight } from "lucide-preact";
+import { AlertTriangle, Flame, Construction, HeartPulse, CarFront, ShieldAlert, Send, MapPin, Clock, ChevronRight } from "lucide-preact";
 import { UserPageShell } from "../components/UserPageShell";
 import { UrgencyBadge } from "../components/UrgencyBadge";
+import { useIncidents, submitIncident } from "@/hooks/useIncidents";
+import { useTasksStore } from "@/store/tasks";
+import { useDeviceLocation } from "@/store/location";
+import type { CreateIncidentDto } from "@/lib/api";
+import type { HazardData, HazardKind, HazardSeverity } from "@/lib/hazards";
 
-type ReportType = "fire" | "flood" | "accident" | "theft" | "other";
 type ReportTab = "baru" | "riwayat";
+type Urgency = "tinggi" | "sedang" | "rendah";
 
-interface Report {
-  id: number;
-  type: ReportType;
-  title: string;
-  description: string;
-  location: string;
-  time: string;
-  urgency: "tinggi" | "sedang" | "rendah";
-  status: "DIPROSES" | "SELESAI" | "BARU";
+// Same HazardKind taxonomy as radar's Lapor Incident and the backend's
+// HazardKindDto — a citizen report lands in the exact same incident feed
+// radar dispatches units from, not a disconnected mock list.
+const REPORT_TYPES: { kind: HazardKind; label: string; icon: typeof Flame; color: string }[] = [
+  { kind: "fire", label: "Kebakaran", icon: Flame, color: "text-[#FF0040] border-[#FF0040]" },
+  { kind: "blocked", label: "Jalur Putus", icon: Construction, color: "text-[#4fc3f7] border-[#4fc3f7]" },
+  { kind: "medical", label: "Medis", icon: HeartPulse, color: "text-[#fabd00] border-[#fabd00]" },
+  { kind: "crash", label: "Kecelakaan", icon: CarFront, color: "text-[#ffb2bd] border-[#ffb2bd]" },
+  { kind: "theft", label: "Pencurian", icon: ShieldAlert, color: "text-[#e1bec2] border-[#e1bec2]" },
+];
+
+const URGENCIES: Urgency[] = ["tinggi", "sedang", "rendah"];
+
+function urgencyToSeverity(u: Urgency): HazardSeverity {
+  if (u === "tinggi") return "critical";
+  if (u === "sedang") return "warning";
+  return "info";
 }
 
-const REPORT_TYPES: { kind: ReportType; label: string; icon: typeof Flame; color: string }[] = [
-  { kind: "fire", label: "Kebakaran", icon: Flame, color: "text-[#FF0040] border-[#FF0040]" },
-  { kind: "flood", label: "Banjir", icon: Droplets, color: "text-[#4fc3f7] border-[#4fc3f7]" },
-  { kind: "accident", label: "Kecelakaan", icon: Car, color: "text-[#fabd00] border-[#fabd00]" },
-  { kind: "theft", label: "Pencurian", icon: AlertCircle, color: "text-[#ffb2bd] border-[#ffb2bd]" },
-  { kind: "other", label: "Lainnya", icon: AlertTriangle, color: "text-[#e1bec2] border-[#e1bec2]" },
-];
-
-const HISTORY: Report[] = [
-  { id: 1, type: "fire", title: "Kebakaran Rumah Warga", description: "Api meluas ke lantai 2, butuh bantuan segera.", location: "Jl. Merdeka No. 10", time: "14:05", urgency: "tinggi", status: "DIPROSES" },
-  { id: 2, type: "flood", title: "Genangan Air di Jalan", description: "Ketinggian air mencapai 50cm, akses terbatas.", location: "Jl. Sudirman Raya", time: "13:42", urgency: "sedang", status: "DIPROSES" },
-  { id: 3, type: "accident", title: "Tabrakan Beruntun", description: "3 kendaraan terlibat, satu korban luka ringan.", location: "Simpang Empat", time: "11:15", urgency: "sedang", status: "SELESAI" },
-  { id: 4, type: "theft", title: "Laporan Pencurian Motor", description: "Motor hilang parkir di depan toko.", location: "Pasar Baru", time: "09:30", urgency: "rendah", status: "SELESAI" },
-];
+function severityToUrgency(s: HazardSeverity): Urgency {
+  if (s === "critical") return "tinggi";
+  if (s === "warning") return "sedang";
+  return "rendah";
+}
 
 const statusColors: Record<string, string> = {
   BARU: "text-[#ffb2bd] border-[#ffb2bd]",
@@ -39,18 +43,39 @@ const statusColors: Record<string, string> = {
   SELESAI: "text-[#66df75] border-[#66df75]",
 };
 
+type IncidentStatus = "BARU" | "DIPROSES" | "SELESAI";
+
+/** Live handling status straight from the shared task/resolution stores — the same state radar acts on. */
+function useIncidentStatus(): (id: string) => IncidentStatus {
+  const tasks = useTasksStore((s) => s.tasks);
+  const resolved = useTasksStore((s) => s.resolvedHazards);
+  return (id) => {
+    if (resolved[id]) return "SELESAI";
+    if (tasks[id]?.status === "enroute") return "DIPROSES";
+    return "BARU";
+  };
+}
+
 function NewReportForm({
   selectedType,
   setSelectedType,
+  urgency,
+  setUrgency,
   description,
   setDescription,
   onSubmit,
+  submitting,
+  notice,
 }: {
-  selectedType: ReportType | null;
-  setSelectedType: (t: ReportType | null) => void;
+  selectedType: HazardKind | null;
+  setSelectedType: (t: HazardKind | null) => void;
+  urgency: Urgency;
+  setUrgency: (u: Urgency) => void;
   description: string;
   setDescription: (d: string) => void;
   onSubmit: () => void;
+  submitting: boolean;
+  notice: string | null;
 }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col gap-5">
@@ -79,6 +104,29 @@ function NewReportForm({
         </div>
       </div>
       <div>
+        <h3 className="font-mono text-[10px] text-[#e1bec2] uppercase tracking-wider mb-2">Tingkat Urgensi</h3>
+        <div className="flex gap-2">
+          {URGENCIES.map((u) => (
+            <button
+              key={u}
+              type="button"
+              onClick={() => setUrgency(u)}
+              className={"flex-1 py-2 border font-mono text-[10px] uppercase tracking-wider transition-colors " + (
+                urgency === u
+                  ? u === "tinggi"
+                    ? "border-[#FF0040] bg-[#FF0040]/10 text-[#FF0040]"
+                    : u === "sedang"
+                    ? "border-[#fabd00] bg-[#fabd00]/10 text-[#fabd00]"
+                    : "border-[#66df75] bg-[#66df75]/10 text-[#66df75]"
+                  : "border-[#444] bg-[#262626] text-[#666] hover:border-[#666]"
+              )}
+            >
+              {u}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
         <label className="font-mono text-[10px] text-[#e1bec2] uppercase tracking-wider mb-2 block">Deskripsi Kejadian</label>
         <textarea
           value={description}
@@ -92,44 +140,58 @@ function NewReportForm({
         <MapPin size={12} className="text-[#ffb2bd]" />
         <span>Lokasi akan dikirim otomatis menggunakan GPS Anda</span>
       </div>
+      {notice && (
+        <div className="font-mono text-[10px] text-[#fabd00] bg-[#fabd00]/10 border border-[#fabd00]/40 p-3">
+          {notice}
+        </div>
+      )}
       <motion.button
         type="button"
         onClick={onSubmit}
-        disabled={!selectedType || !description.trim()}
-        whileTap={selectedType && description.trim() ? { scale: 0.97 } : {}}
-        className={"w-full font-mono font-bold text-sm tracking-[1px] uppercase flex items-center justify-center gap-2 py-4 transition-all " + (selectedType && description.trim() ? "bg-[#cb2957] text-[#ffe9eb] hover:bg-[#b8174a]" : "bg-[#2a2a2a] text-[#666] cursor-not-allowed")}
+        disabled={!selectedType || !description.trim() || submitting}
+        whileTap={selectedType && description.trim() && !submitting ? { scale: 0.97 } : {}}
+        className={"w-full font-mono font-bold text-sm tracking-[1px] uppercase flex items-center justify-center gap-2 py-4 transition-all " + (selectedType && description.trim() && !submitting ? "bg-[#cb2957] text-[#ffe9eb] hover:bg-[#b8174a]" : "bg-[#2a2a2a] text-[#666] cursor-not-allowed")}
       >
         <Send size={16} />
-        <span>Kirim Laporan</span>
+        <span>{submitting ? "Mengirim..." : "Kirim Laporan"}</span>
       </motion.button>
     </motion.div>
   );
 }
 
-function HistoryView({ reports, onSelect }: { reports: Report[]; onSelect: (r: Report) => void }) {
+function HistoryView({
+  incidents,
+  statusOf,
+  onSelect,
+}: {
+  incidents: HazardData[];
+  statusOf: (id: string) => IncidentStatus;
+  onSelect: (h: HazardData) => void;
+}) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-2">
       <AnimatePresence mode="popLayout">
-        {reports.map((report, i) => {
-          const TypeIcon = REPORT_TYPES.find((t) => t.kind === report.type)?.icon ?? AlertTriangle;
+        {incidents.map((incident, i) => {
+          const TypeIcon = REPORT_TYPES.find((t) => t.kind === incident.kind)?.icon ?? AlertTriangle;
+          const status = statusOf(incident.id);
           return (
             <motion.button
-              key={report.id}
+              key={incident.id}
               layout
               initial={{ opacity: 0, x: -8 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.05, type: "spring", stiffness: 300, damping: 28 }}
-              onClick={() => onSelect(report)}
+              onClick={() => onSelect(incident)}
               className="w-full text-left bg-[#262626] border border-[#444] p-4 flex items-center gap-3 hover:border-[#ffb2bd] transition-colors group"
             >
               <div className="w-8 h-8 border border-[#444] flex items-center justify-center bg-[#2a2a2a] shrink-0">
                 <TypeIcon size={14} className="text-[#e1bec2]" />
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-grotesk font-semibold text-sm text-[#e5e2e1] group-hover:text-[#ffb2bd] transition-colors truncate">{report.title}</h3>
+                <h3 className="font-grotesk font-semibold text-sm text-[#e5e2e1] group-hover:text-[#ffb2bd] transition-colors truncate">{incident.label}</h3>
                 <div className="flex items-center gap-2 mt-0.5">
-                  <span className={"font-mono text-[9px] uppercase px-1 py-0.5 border " + statusColors[report.status]}>{report.status}</span>
-                  <span className="font-mono text-[9px] text-[#666]">{report.time}</span>
+                  <span className={"font-mono text-[9px] uppercase px-1 py-0.5 border " + statusColors[status]}>{status}</span>
+                  <span className="font-mono text-[9px] text-[#666]">{incident.time}</span>
                 </div>
               </div>
               <ChevronRight size={14} className="text-[#666] group-hover:text-[#ffb2bd] shrink-0" />
@@ -141,12 +203,20 @@ function HistoryView({ reports, onSelect }: { reports: Report[]; onSelect: (r: R
   );
 }
 
-function DetailView({ report, onBack }: { report: Report; onBack: () => void }) {
-  const TypeIcon = REPORT_TYPES.find((t) => t.kind === report.type)?.icon ?? AlertTriangle;
+function DetailView({
+  incident,
+  status,
+  onBack,
+}: {
+  incident: HazardData;
+  status: IncidentStatus;
+  onBack: () => void;
+}) {
+  const TypeIcon = REPORT_TYPES.find((t) => t.kind === incident.kind)?.icon ?? AlertTriangle;
   return (
     <UserPageShell
       title="Detail Laporan"
-      description={"LAPORAN #" + report.id}
+      description={"LAPORAN " + incident.id.slice(0, 8).toUpperCase()}
       action={
         <button onClick={onBack} className="font-mono text-[10px] text-[#ffb2bd] uppercase tracking-wider">
           Kembali
@@ -160,20 +230,16 @@ function DetailView({ report, onBack }: { report: Report; onBack: () => void }) 
               <TypeIcon size={16} className="text-[#ffb2bd]" />
             </div>
             <div>
-              <h3 className="font-grotesk font-semibold text-base text-[#e5e2e1]">{report.title}</h3>
-              <span className={"font-mono text-[10px] uppercase px-1.5 py-0.5 border inline-block mt-1 " + statusColors[report.status]}>{report.status}</span>
+              <h3 className="font-grotesk font-semibold text-base text-[#e5e2e1]">{incident.label}</h3>
+              <span className={"font-mono text-[10px] uppercase px-1.5 py-0.5 border inline-block mt-1 " + statusColors[status]}>{status}</span>
             </div>
           </div>
-          <UrgencyBadge level={report.urgency} />
+          <UrgencyBadge level={severityToUrgency(incident.severity)} />
         </div>
-        <p className="font-mono text-sm text-[#e1bec2] leading-relaxed">{report.description}</p>
-        <div className="flex items-center gap-2 font-mono text-[10px] text-[#e1bec2] bg-[#1a1a1a] p-2 border border-[#444]">
-          <MapPin size={12} />
-          <span>{report.location}</span>
-        </div>
+        <p className="font-mono text-sm text-[#e1bec2] leading-relaxed">{incident.description}</p>
         <div className="flex items-center gap-2 font-mono text-[10px] text-[#666]">
           <Clock size={12} />
-          <span>{report.time} WIB</span>
+          <span>{incident.time} WIB</span>
         </div>
       </motion.div>
     </UserPageShell>
@@ -182,25 +248,64 @@ function DetailView({ report, onBack }: { report: Report; onBack: () => void }) 
 
 export function EmergencyReport() {
   const [tab, setTab] = useState<ReportTab>("baru");
-  const [selectedType, setSelectedType] = useState<ReportType | null>(null);
+  const [selectedType, setSelectedType] = useState<HazardKind | null>(null);
+  const [urgency, setUrgency] = useState<Urgency>("sedang");
   const [description, setDescription] = useState("");
-  const [showHistory, setShowHistory] = useState<Report | null>(null);
+  const [selectedIncident, setSelectedIncident] = useState<HazardData | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const { coords } = useDeviceLocation();
 
-  const handleSubmit = () => {
-    if (!selectedType || !description.trim()) return;
+  // Same live incident feed radar's tactical map, Status Taktis, and Lapor
+  // Incident history all read — with the SQLite offline cache underneath.
+  const { data: incidents = [] } = useIncidents();
+  const statusOf = useIncidentStatus();
+
+  const handleSubmit = async () => {
+    if (!selectedType || !description.trim() || submitting) return;
+    setSubmitting(true);
+    setNotice(null);
+    const typeLabel = REPORT_TYPES.find((t) => t.kind === selectedType)?.label ?? selectedType;
+    const dto: CreateIncidentDto = {
+      kind: selectedType,
+      label: `Laporan Warga — ${typeLabel}`,
+      description: coords
+        ? `${description.trim()} [dilaporkan dari ${coords.lat.toFixed(5)}, ${coords.lon.toFixed(5)}]`
+        : description.trim(),
+      severity: urgencyToSeverity(urgency),
+      // Incident offsets are relative to whichever viewer renders them (see
+      // src/lib/hazards.ts) — 0,0 means "at the reporter's position", the
+      // same convention radar's Lapor Incident uses.
+      offsetLat: 0,
+      offsetLon: 0,
+    };
+    const result = await submitIncident(dto);
+    setSubmitting(false);
     setSelectedType(null);
     setDescription("");
-    setTab("riwayat");
+    setUrgency("sedang");
+    if (result === "queued") {
+      setNotice("Offline — laporan tersimpan di perangkat, terkirim otomatis saat sinyal kembali.");
+      setTab("baru");
+    } else {
+      setTab("riwayat");
+    }
   };
 
-  if (showHistory) {
-    return <DetailView report={showHistory} onBack={() => setShowHistory(null)} />;
+  if (selectedIncident) {
+    return (
+      <DetailView
+        incident={selectedIncident}
+        status={statusOf(selectedIncident.id)}
+        onBack={() => setSelectedIncident(null)}
+      />
+    );
   }
 
   return (
     <UserPageShell
       title="Laporan Darurat"
-      description={tab === "baru" ? "Sampaikan laporan ke pusat komando" : "Riwayat laporan Anda"}
+      description={tab === "baru" ? "Sampaikan laporan ke pusat komando" : "Laporan insiden aktif di area Anda"}
       action={
         <div className="flex gap-2">
           <button
@@ -222,12 +327,16 @@ export function EmergencyReport() {
         <NewReportForm
           selectedType={selectedType}
           setSelectedType={setSelectedType}
+          urgency={urgency}
+          setUrgency={setUrgency}
           description={description}
           setDescription={setDescription}
-          onSubmit={handleSubmit}
+          onSubmit={() => void handleSubmit()}
+          submitting={submitting}
+          notice={notice}
         />
       ) : (
-        <HistoryView reports={HISTORY} onSelect={setShowHistory} />
+        <HistoryView incidents={incidents} statusOf={statusOf} onSelect={setSelectedIncident} />
       )}
     </UserPageShell>
   );

@@ -20,7 +20,7 @@ export function UserPageShell({
   action,
 }: UserPageShellProps) {
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-[#131313] pb-20">
+    <div className="flex-1 h-full overflow-y-auto bg-[#131313] pb-[calc(5rem+env(safe-area-inset-bottom))]">
       <header className="border-b-2 border-[#444] px-4 py-3 flex items-start justify-between gap-2 shrink-0">
         <div className="min-w-0">
           <h1 className="font-grotesk font-bold text-xl text-[#e5e2e1] tracking-[-0.4px] truncate">

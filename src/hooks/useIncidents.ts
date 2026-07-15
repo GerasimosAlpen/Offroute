@@ -1,10 +1,35 @@
 import { useQuery } from "@tanstack/preact-query";
-import { incidentsApi, type Incident } from "@/lib/api";
+import { incidentsApi, type CreateIncidentDto, type Incident } from "@/lib/api";
 import { HAZARDS, type HazardData } from "@/lib/hazards";
 import { socket } from "@/lib/socket";
 import { queryClient } from "@/lib/queryClient";
-import { cacheGetAll, cacheSet } from "@/lib/offlineCache";
+import { cacheGetAll, cacheSet, enqueueMutation, registerReplayHandler } from "@/lib/offlineCache";
 import { raiseAlert } from "@/lib/alerts";
+
+// Replays incident reports that were filed while offline — a report written
+// in a dead zone still reaches radar the moment connectivity returns.
+registerReplayHandler("incidentsApi.create", async (payload) => {
+  await incidentsApi.create(payload as CreateIncidentDto);
+  void queryClient.invalidateQueries({ queryKey: ["incidents"] });
+});
+
+/**
+ * Submit an incident report, offline-first: tries the backend, and if that
+ * fails the report is queued in the SQLite mutation queue and replayed on
+ * reconnect. Resolves to how the report was handled, so the UI can say
+ * "sent" vs "saved, will send when back online" honestly.
+ */
+export async function submitIncident(dto: CreateIncidentDto): Promise<"sent" | "queued"> {
+  try {
+    await incidentsApi.create(dto);
+    void queryClient.invalidateQueries({ queryKey: ["incidents"] });
+    return "sent";
+  } catch (err) {
+    console.warn("[useIncidents] Submit failed, queueing for replay:", err);
+    await enqueueMutation({ domain: "incidents", method: "incidentsApi.create", payload: dto });
+    return "queued";
+  }
+}
 
 // Registered once at module load (not per hook call, unlike an effect inside
 // a component) — another client reporting an incident invalidates the cache

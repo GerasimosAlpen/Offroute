@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { getPersisted, setPersisted } from "@/lib/persist";
+import { formatCoords } from "@/lib/format";
 
 export type GeoStatus =
   | "cached"
@@ -29,12 +30,6 @@ interface CachedLocation {
 }
 
 const STORAGE_KEY = "ranger:last-location";
-
-function formatCoords(lat: number, lon: number) {
-  const latHemi = lat >= 0 ? "N" : "S";
-  const lonHemi = lon >= 0 ? "E" : "W";
-  return `${Math.abs(lat).toFixed(4)}°${latHemi} ${Math.abs(lon).toFixed(4)}°${lonHemi}`;
-}
 
 async function reverseGeocode(
   lat: number,
@@ -76,6 +71,57 @@ export const useLocationStore = create<LocationState>(() => ({
 let started = false;
 let lastCoordsKey: string | null = null;
 let geocodeAbort: AbortController | null = null;
+// True once a real GPS fix lands — so the approximate IP fallback can't
+// clobber precise coordinates that arrive later.
+let hasLiveFix = false;
+let ipTried = false;
+
+/**
+ * IP-based approximate location — the reliable fallback when the browser
+ * Geolocation API is unavailable or denied. This is the fix for radar in the
+ * Tauri desktop build specifically: WKWebView on macOS (and WebView2/WebKitGTK
+ * elsewhere) frequently never surfaces the OS geolocation prompt, so
+ * `watchPosition` silently yields nothing. IP geo gives a real city-level
+ * position, which is exactly right for a stationary command console. Precise
+ * GPS still takes over automatically if it ever succeeds.
+ */
+// Free, keyless, CORS-open IP geolocation providers, tried in order — a
+// second one covers the first being rate-limited/down (ipapi.co paywalls
+// quickly, so ipwho.is leads).
+const IP_GEO_PROVIDERS = ["https://ipwho.is/", "https://ipapi.co/json/"];
+
+async function ipGeolocate(): Promise<{ lat: number; lon: number } | null> {
+  for (const url of IP_GEO_PROVIDERS) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const d = await res.json();
+      // Both providers expose `latitude`/`longitude`; ipwho.is flags failure
+      // with `success: false`.
+      if (d?.success === false) continue;
+      const lat = Number(d.latitude);
+      const lon = Number(d.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lon) && !(lat === 0 && lon === 0)) {
+        return { lat, lon };
+      }
+    } catch {
+      // try the next provider
+    }
+  }
+  return null;
+}
+
+async function tryIpFallback() {
+  if (hasLiveFix || ipTried) return;
+  ipTried = true;
+  const ip = await ipGeolocate();
+  if (hasLiveFix) return; // a precise fix landed while we were fetching
+  if (ip) {
+    handleFix(ip.lat, ip.lon);
+  } else if (!useLocationStore.getState().coords) {
+    useLocationStore.setState({ status: "unavailable", label: "LOCATION UNKNOWN" });
+  }
+}
 
 function handleFix(lat: number, lon: number) {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
@@ -128,21 +174,28 @@ function startWatching() {
   void loadCachedLabel();
 
   if (!navigator.geolocation) {
-    useLocationStore.setState({ status: "unavailable", label: "LOCATION UNKNOWN" });
+    void tryIpFallback();
     return;
   }
 
   navigator.geolocation.watchPosition(
-    (position) => handleFix(position.coords.latitude, position.coords.longitude),
-    (error) => {
-      useLocationStore.setState(
-        error.code === error.PERMISSION_DENIED
-          ? { status: "denied", label: "LOCATION ACCESS DENIED" }
-          : { status: "unavailable", label: "LOCATION UNKNOWN" },
-      );
+    (position) => {
+      hasLiveFix = true;
+      handleFix(position.coords.latitude, position.coords.longitude);
+    },
+    () => {
+      // Any geolocation failure (denied, timeout, or the silent no-op the
+      // Tauri webview does) falls back to approximate IP location rather than
+      // leaving radar with no position at all.
+      void tryIpFallback();
     },
     { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
   );
+
+  // watchPosition can hang without ever firing either callback in some
+  // webviews (notably Tauri's) — so kick the IP fallback after a short wait
+  // regardless, guarded so a real fix always wins.
+  setTimeout(() => void tryIpFallback(), 6000);
 }
 
 /** Reads the shared location state, starting the GPS watch on first use. */

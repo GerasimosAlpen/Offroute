@@ -18,6 +18,185 @@ not as a statement of current reality.
 
 # Backend (NestJS)
 
+## Control console: terminal, data reset, app control (2026-07-15)
+
+Turned the System Monitor into a control center, and added a real Linux-style
+diagnostic terminal.
+
+- **Diagnostic terminal** (`/ranger/radar/terminal`, nav "Terminal"). Feels
+  like a real shell: `radar@offroute:~$` prompt, blinking block cursor,
+  up/down command history, Ctrl+L. Real **allowlisted read-only** OS commands
+  run via Tauri (`commands/terminal.rs` — `run_system_command`): uname, df,
+  vm_stat, ifconfig, ping (auto `-c 4`), ps, top, etc. Spawned directly (no
+  shell → no `;`/pipe injection), 10s timeout, 40KB output cap. **Not an
+  allowlist match → friendly refusal; not in Tauri → a notice, never an
+  error.** Built-ins run anywhere: help, clear, status, health, queue[ flush],
+  ble, reseed, report, restart, about (`src/lib/terminal.ts`).
+- **Reset mock data** — new `POST /admin/reseed` (`admin` module) wipes every
+  domain table in FK-safe order and restores the canonical rangers + seed
+  incidents + initial comms, in one transaction, then broadcasts `data-reset`
+  so every client reloads to a clean state. `GET /admin/stats` gives live row
+  counts (shown in the monitor). **Verified live**: a DB with accumulated test
+  junk (7 incidents, tasks, victims, pins, flare) → exactly the canonical seed
+  (4 personnel, 5 incidents, everything else 0). Surfaced as a two-step
+  confirm button + the `reseed --yes` terminal command.
+- **App control** (`commands/control.rs`, no extra plugin — uses
+  `AppHandle::restart()/exit()`): **Restart App** and Quit. Deliberately an
+  *app* restart, **not an OS reboot** — rebooting the operator's machine
+  mid-operation is destructive and privileged, so "reboot" is scoped to
+  relaunching this process (stated in the UI). `write_report_file` writes a
+  diagnostics report to ~/Downloads (browser falls back to a blob download —
+  still "makes a file").
+- **Multi-directional window resize** shipped earlier this session
+  (`FloatingWindow`, 8 grips).
+
+New Tauri commands need no capability entries (custom app commands aren't
+plugin-gated). `tokio` gained the `process`/`time` features for the terminal.
+
+## System Monitor + whole-op observability pass (2026-07-15)
+
+Made radar a complete observer of every role, and gave it a self-healing
+diagnostics console — verified the whole loop end-to-end against the real DB.
+
+- **Radar watches everything.** New `src/store/systemActivity.ts` is a
+  read-only observer that subscribes to all 15 domain WS events and folds
+  them into one live timeline (warga reports, SOS, dispatch/report/confirm,
+  evac, FLARE, backup pins, unit online/offline via presence-diff). Rendered
+  by `SystemActivityFeed`.
+- **Its own page, not another window.** The tactical map went back to its
+  clean 4-window layout; the monitor lives at `/ranger/radar/monitor` (nav
+  "Monitor Sistem"). `SystemMonitor.tsx` shows a parameter grid — API +
+  latency, DB, WebSocket, connectivity, offline-queue depth, Bluetooth mesh,
+  GPS, BMKG feed, online units, server address — plus **self-heal commands**
+  (reconnect WS, flush offline queue, rescan BLE, refresh data, re-check) and
+  the live activity feed.
+- **New `GET /health`** (`app.controller.ts`, registered in `app.module`) —
+  liveness + DB reachability; `healthApi.ping()` times it. Verified live:
+  `{ok:true, db:true}` at ~88ms.
+- **Multi-directional window resize.** `FloatingWindow` now has 8 grips
+  (N/S/E/W + corners); dragging any edge/corner resizes with the opposite
+  edge pinned, OS-style — not just bottom-right.
+- **End-to-end verification (real Supabase DB, live server).** Drove the full
+  handshake over REST: warga `POST /incidents` → personel `self-assign`
+  (second unit correctly **400 blocked**) → `report done` (200) → radar
+  `reject` → back to enroute → `report` again → `confirm` (201) → hazard in
+  `/tasks/resolved`, live task cleared. Every step behaved as designed.
+
+Still needs a real two-**client** UI test (WS fan-out between two browsers);
+the backend + event contract are confirmed, the cross-client rendering isn't
+yet exercised here.
+
+## Task-completion handshake + Comm Center hub pass (2026-07-15) — no migration
+
+Made the radar↔personel↔warga loop a real two-way coordination system,
+centered on the Comm Center. **No schema change** — `TaskStatus` stays
+`enroute|arrived`; the extra lifecycle rides on existing tables:
+
+- **Two-step completion.** `arrived` now means "field unit reported done,
+  awaiting radar confirmation" — it no longer auto-writes a ResolvedHazard.
+  New `POST /tasks/:id/confirm` (writes ResolvedHazard + `task-confirmed`,
+  clears the live task) and `POST /tasks/:id/reject` (`task-rejected`, unit
+  back to enroute). `GET /tasks/resolved` hydrates confirmed ones separately.
+  Client lifecycle: `enroute → onscene → reported → (confirmed)`. Personel
+  marks done from the Bahaya page (`TaskActions` in `DangerLevel.tsx`); radar
+  confirms from either Status Taktis or the Comm Center pending-cards.
+- **Self-assign + double-dispatch validation.** `POST /tasks/self-assign`
+  (personel takes a hazard themselves, SERIALIZABLE-validated so it can't
+  race radar). Store guards every dispatch path with `hazardHasActiveUnit()`;
+  Status Taktis hides "Kirim Unit" whenever a unit is already on it, and
+  shows "MANDIRI" when the unit self-assigned. So radar never sends a second
+  unit to a hazard a field unit already took.
+- **Comm Center = the hub.** Renamed the operator sender "ANDA" → **HQ**.
+  Dispatching auto-opens the unit's comms frequency and auto-draws the route
+  (route was already drawn; the frequency line + per-unit filter are new).
+  Pending completion reports surface as Konfirmasi/Kembalikan cards in the
+  panel. Backup requests (`Minta Backup`) now drop a pulsing red map pin
+  (`MessagePinMarkers`, brought back) so HQ sees *where*, plus the chat line.
+- **OS-like windows.** Radar panels minimize to a `WindowTaskbar`
+  (`useWindowLayout` gained `minimized` + persist) to declutter.
+- **Cross-device responsive.** Tauri window now 1440×900, min 1024×640,
+  resizable+centered (was a fixed 800×600). Mobile shells use `h-dvh`
+  (phone browser-chrome safe) + `viewport-fit=cover`; radar padding/header
+  scale down (`p-4 lg:p-10`). Radar stays desktop-gated by design; personel
+  and warga are mobile-first.
+
+Everything above builds clean (frontend tsc+vite, nest, cargo). Not yet
+exercised with two live clients — the confirm/reject and self-assign races
+want a real two-device smoke test.
+
+## Cross-role integration pass (2026-07-15) — every role now works from the same live data
+
+Follow-up to the bug-fix pass below, per an explicit "all roles work
+together, offline-first, de-hardcode" request:
+
+- **Dispatch works on live data**: `useTasksStore.assign()` now accepts an
+  `AssignContext` of the live `useIncidents()`/`usePersonnel()` results,
+  threaded from `HazardStatusPanel` — a newly reported incident is now
+  actually dispatchable via "Kirim Unit" (previously only seed-id hazards
+  were; the static arrays remain the documented fallback).
+- **User role wired into the real feed**: `EmergencyReport` submits real
+  `POST /incidents` (shared `HazardKind` taxonomy, GPS folded into the
+  description, offline mutation-queue replay via the new `submitIncident()`
+  in `useIncidents.ts` — also adopted by radar's `LaporIncident`), and its
+  history tab is the live incident list with handling status derived from
+  the shared task/resolution stores. `DisasterMap`'s mock markers/routes are
+  gone: it renders confirmed evacuation points + live incidents, and fetches
+  a real OSRM walking route (bezier fallback offline) to whichever marker is
+  selected.
+- **Personel wired into the real feed**: `PetaTaktis`'s and `DangerLevel`'s
+  hardcoded EVENTS arrays replaced with adapters over `useIncidents()`
+  (`hazardsToEventMarkers` in `peta-taktis/events.ts`); handling status
+  comes from the shared tasks store. Casualty counts are shown as "—" now
+  (no real data) instead of invented numbers.
+- **Realtime cross-device location**: `location.ts` was already a
+  continuous `watchPosition`; what was missing was *sharing*. The presence
+  heartbeat now carries a validated `lat`/`lon` (sent every 20s AND on GPS
+  movement, ≥3s apart), the gateway passes it through `presence-update`,
+  radar renders every live unit via `LivePersonnelMarkers`, and positions
+  feed the single shared `rangerLastKnownPos` through
+  `reportRemoteRangerPosition()` (guarded so a locally-animated glide is
+  never yanked by its own echo).
+- **De-hardcoded connectivity**: backend URL resolves via
+  `src/lib/apiBase.ts` (localStorage `offroute.apiUrl` override → import
+  `VITE_API_URL` → localhost); server CORS origins extendable via a
+  `CORS_ORIGINS` env var for LAN devices; the Socket.IO client now retries
+  **forever** with backoff (it used to permanently give up after 10
+  attempts — fatal in intermittent disaster networks).
+
+Still deliberately static/simulated: `RANGERS` roster fallback,
+`getSelfRanger()` random-identity stand-in (blocked on the deferred login
+system), and everything inside the FLARE drill cinematic.
+
+## Bug-fix pass (2026-07-14) — concurrency races fixed app-level; one migration left for the collaborator
+
+A whole-codebase bug hunt fixed the backend's check-then-write races
+**without touching the Prisma schema** (deliberate — no migration run
+against the shared Supabase DB from this side):
+
+- `PrismaService` now exposes `$transaction` (+ a `PrismaTx` type);
+  `tasks.assign()` and `flare.activate()` run their guards + create inside
+  SERIALIZABLE interactive transactions, `tasks.updateStatus()` and
+  `evacuation.accept()` wrap their two-write sequences in transactions.
+- `tasks.updateStatus()` gained a transition guard (only `enroute→arrived`;
+  repeat PATCHes are idempotent no-ops, no re-emit).
+- `flare.activate()` is idempotent while a FLARE is active (returns the
+  existing alert instead of minting a duplicate-sequence second one).
+- Victims: a `rescued` victim can no longer be resurrected onto radar by a
+  late `report()`/`assignRanger()` (`400` instead of a `victim-sos`
+  re-broadcast); `confirmRescue()` is idempotent.
+- Evacuation: `reject()` (and `accept()`) now broadcast
+  `evac-request-decided { id, accepted }` so other radar clients drop the
+  pending card (frontend subscribes in `src/store/evacuationRequests.ts`);
+  `createRequest()` dedupes to one open request per ranger.
+- DTO lat/lon fields got `@Min/@Max` bounds; CORS origins unified in
+  `_server/src/cors.ts` (used by both `main.ts` and the gateway).
+
+**For the collaborator (needs a Prisma migration, not done here):** the
+durable fix for the assign race is a partial unique index on
+`Task(hazardId) WHERE status = 'enroute'` — the SERIALIZABLE transaction in
+`tasks.service.ts` covers it app-level, but a DB constraint is the real
+guarantee. See the `TODO(collaborator)` comment in `tasks.service.ts`.
+
 ## Realtime personel tracking & tasking — now built, see wiring pass below
 
 The task/assignment model, WS gateway, and REST endpoints described in this
@@ -106,12 +285,13 @@ completion, FLARE stand-down, SQLite cache, Bluetooth Tier 1" below:**
   panel now reads from `useIncidents()`.
 - ~~`EventsGateway` provided per-module~~ — fixed: consolidated into a
   shared `GatewayModule`.
-- **Still true, not addressed:** uncommitted local diff in
-  `_server/prisma/schema.prisma` plus an untracked `_server/bun.lock` were
-  sitting in the working tree when the original audit ran — worth
-  reconciling/committing (or discarding, if stray) before either of you
-  relies on `main` matching what's actually running. Left alone since it's
-  not this session's to resolve unilaterally.
+- ~~Uncommitted local diff in `_server/prisma/schema.prisma` + untracked
+  `_server/bun.lock`~~ — **resolved before 2026-07-14's bug-fix pass**:
+  verified `git status` clean for `_server/` and `bun.lock` tracked. Note
+  the repo root still tracks three lockfiles (`bun.lock`, `deno.lock`,
+  `package-lock.json`) while the build runs via `deno task` — deliberately
+  left alone (can't verify which package managers are in daily use), but
+  worth consolidating eventually.
 
 **Known limitation, not fixed in this pass:** `src/store/tasks.ts`'s
 `assign()` still looks up hazards/rangers from the static `HAZARDS`/`RANGERS`
@@ -215,11 +395,27 @@ fully online-only — see the offline routing note under Backend (Tauri).
 
 # Backend (Tauri / Rust)
 
-## Native device location — deferred (disk/build issues, see history)
+## Native device location — deferred; IP fallback shipped 2026-07-15 (fixes Tauri "no location")
+
+**Resolved the practical blocker without native code:** radar reported it
+"can't access realtime location" in `deno task tauri dev` — the classic
+WKWebView symptom where the OS geolocation prompt never appears and
+`watchPosition` silently yields nothing. `src/store/location.ts` now falls
+back to **IP-based geolocation** (`ipwho.is`, then `ipapi.co`; both keyless,
+CORS-open, added to the Tauri CSP `connect-src`) whenever the Geolocation API
+is unavailable, denied, errors, OR hasn't produced a fix within 6s (webviews
+can hang without firing either callback). Gives a real city-level position —
+exactly right for a stationary command console — and precise GPS still takes
+over automatically (`hasLiveFix` guard) if it ever succeeds. Verified the
+provider returns correct coordinates for this network. `setManualLocation`
+remains as the explicit override.
+
+The native route below is still the "someday, precise, mobile" answer, but is
+no longer blocking desktop radar.
 
 Removed after causing macOS link failures and burning a lot of disk space
-mid-session. Browser Geolocation (`src/store/location.ts`) is the only
-location source again, same as before this was attempted.
+mid-session. Browser Geolocation (`src/store/location.ts`) is the primary
+source; IP fallback (above) covers the webview gap.
 
 **Why native was wanted:** Tauri's webview Geolocation API is unreliable
 across platforms; the plan was a real Tauri command (`get_device_location`)
@@ -777,3 +973,33 @@ always-on ambient readout (every page, every phase). `BmkgTicker.tsx` on the
 map only appears once a FLARE is active — same data, different context.
 Don't merge these; sidebar = "business as usual," map = "relevant right
 now."
+
+## Login / auth — deferred, not built yet
+
+No auth system exists anywhere in this codebase today — no `User` model, no
+session/token handling, no login UI on either radar or personel. This was
+first flagged as an open question back when radar's desktop-only gate
+(`DesktopOnlyGate.tsx`) was built: "detect if the app is open on desktop so
+we can navigate our user to a login tab and know who it is and what role
+they're in" — deliberately not scoped then given how large a decision it is.
+User explicitly asked (2026-07-14) for this to be added to the backlog for
+later, one login page each for **radar** and **personel** — not to be
+implemented now.
+
+**Open questions to resolve before starting:**
+- Backend: needs a real `User`/`Session` model in Prisma, password hashing
+  (or magic-link/OTP given the disaster-response context — a memorized
+  password may not be realistic for a field ranger mid-emergency), and
+  session/token issuance + validation middleware across every existing REST
+  endpoint (currently all wide open, no auth guard anywhere).
+- Role assignment: how does a login map to RADAR vs PERSONEL? A single
+  `role` field on `User`, or something more granular per-ranger (tying into
+  the existing `Personnel` model / `RANGERS` roster)?
+- Radar vs personel login UX likely differ a lot — radar is a stationary
+  desktop console (one-time login per shift is probably fine), personel is
+  the no-install-friendly mobile side (the new `/sos` page proves a
+  no-account flow is possible and valuable — don't accidentally force every
+  personel interaction behind a login if that undermines that).
+- Interacts with the still-open desktop-detection idea from `CLAUDE.md`
+  (redirect a desktop browser hitting personel's routes to a login/role
+  picker) — worth deciding together rather than as two separate features.

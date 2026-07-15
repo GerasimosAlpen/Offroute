@@ -28,7 +28,7 @@ export function UserBottomNav() {
       initial={{ y: 48, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ type: "spring", stiffness: 300, damping: 28, delay: 0.3 }}
-      className="fixed bottom-0 left-0 w-full flex justify-around items-center px-2 pb-3 pt-2 bg-[#131313] border-t-2 border-[#444] z-50"
+      className="fixed bottom-0 left-0 w-full flex justify-around items-center px-2 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-[#131313] border-t-2 border-[#444] z-50"
     >
       {TABS.map((tab) => {
         const isActive = activeTab?.href === tab.href;

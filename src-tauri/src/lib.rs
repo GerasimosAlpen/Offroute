@@ -1,9 +1,9 @@
 mod commands;
 
-// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+// Demo-playground IPC smoke test (TauriCard.tsx) — proves the invoke bridge works.
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {} aku sontoloyo", name)
+    format!("Hello, {name}!")
 }
 
 fn build_stronghold() -> tauri::plugin::TauriPlugin<tauri::Wry> {
@@ -11,7 +11,10 @@ fn build_stronghold() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     tauri_plugin_stronghold::Builder::new(|password| {
         let params = Params::new(19456, 2, 1, Some(32)).expect("invalid argon2 params");
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-        // Salt should be device-specific in production; swap with a persisted random salt
+        // Salt should be device-specific in production; swap with a persisted
+        // random salt. Left static deliberately for now — changing it makes
+        // every existing stronghold store permanently undecryptable, so the
+        // swap needs a migration story, not a drive-by fix.
         let salt = b"offroute-key-v01";
         let mut key = vec![0u8; 32];
         argon2
@@ -43,6 +46,10 @@ pub fn run() {
             commands::bluetooth::ble_connect,
             commands::bluetooth::ble_disconnect,
             commands::bluetooth::ble_send_message,
+            commands::terminal::run_system_command,
+            commands::control::restart_app,
+            commands::control::quit_app,
+            commands::control::write_report_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

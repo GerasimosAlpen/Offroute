@@ -44,11 +44,18 @@ async function fetchLatestQuake() {
     if (!g) throw new Error("unexpected response shape");
 
     const [lat, lon] = String(g.Coordinates).split(",").map(Number);
+    const magnitude = parseFloat(g.Magnitude);
+    const depthKm = parseFloat(g.Kedalaman);
+    // A malformed field would otherwise publish NaN into the map/HUD —
+    // treat it the same as an unavailable feed.
+    if (![lat, lon, magnitude, depthKm].every(Number.isFinite)) {
+      throw new Error("malformed quake fields");
+    }
     useBmkgStore.setState({
       status: "ready",
       quake: {
-        magnitude: parseFloat(g.Magnitude),
-        depthKm: parseFloat(g.Kedalaman),
+        magnitude,
+        depthKm,
         region: g.Wilayah,
         lat,
         lon,

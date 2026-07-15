@@ -10,6 +10,8 @@ import { SquadLogs } from "./pages/SquadLogs";
 import { LaporIncident } from "./pages/LaporIncident";
 import { CommCenter } from "./pages/CommCenter";
 import { SectorStatus } from "./pages/SectorStatus";
+import { SystemMonitor } from "./pages/SystemMonitor";
+import { Terminal } from "./pages/Terminal";
 import { RadarSettings } from "./pages/RadarSettings";
 
 export default function RadarPage() {
@@ -23,6 +25,8 @@ export default function RadarPage() {
             <Route path="/ranger/radar/incident" component={LaporIncident} />
             <Route path="/ranger/radar/comm" component={CommCenter} />
             <Route path="/ranger/radar/status" component={SectorStatus} />
+            <Route path="/ranger/radar/monitor" component={SystemMonitor} />
+            <Route path="/ranger/radar/terminal" component={Terminal} />
             <Route path="/ranger/radar/settings" component={RadarSettings} />
             <Route component={TacticalMap} />
           </Switch>

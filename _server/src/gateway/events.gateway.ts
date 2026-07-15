@@ -41,6 +41,7 @@ export interface PresenceEntry {
  *  - presence-update   PresenceEntry[] — every currently-connected personel unit
  *  - victim-sos        Victim payload — new or updated SOS ping from /sos
  *  - victim-rescued    { id } — radar marked a victim as found
+ *  - data-reset        { ts } — the database was reseeded; clients should re-hydrate
  *
  * Events received (Client → Server):
  *  - presence-heartbeat  { rangerId, name, callsign, dutyStatus?, lat?, lon? }

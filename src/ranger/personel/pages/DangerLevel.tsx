@@ -1,86 +1,43 @@
-import { useState } from "preact/hooks";
+import { useMemo, useState } from "preact/hooks";
 import { motion, AnimatePresence } from "framer-motion";
-import { MapPin, Flame, AlertTriangle, ShieldAlert, Zap, Clock, Navigation } from "lucide-preact";
+import { MapPin, Flame, AlertTriangle, ShieldAlert, Zap, Clock } from "lucide-preact";
 import { PersonelPageShell } from "../components/PersonelPageShell";
+import { CheckCircle2, Hand, Loader2 } from "lucide-preact";
+import { useIncidents } from "@/hooks/useIncidents";
+import { useTasksStore } from "@/store/tasks";
+import { useDeviceLocation } from "@/store/location";
+import { getSelfRanger } from "@/lib/rangers";
+import { formatCoords } from "@/lib/format";
+import type { HazardData, HazardKind, HazardSeverity } from "@/lib/hazards";
 
 type DangerLevel = "KRITIS" | "TINGGI" | "SEDANG" | "RENDAH";
 type EventType = "KEBAKARAN" | "BENCANA" | "MEDIS" | "KEAMANAN";
 
 interface Event {
-  id: number;
+  id: string;
   name: string;
   type: EventType;
   danger: DangerLevel;
   location: string;
-  coords: { lat: number; lon: number };
   time: string;
   description: string;
-  affected: number;
+  affected?: number;
   status: "AKTIF" | "DIPROSES" | "TERKENDALI";
 }
 
-const EVENTS: Event[] = [
-  {
-    id: 1,
-    name: "Kebakaran Gedung Kantor",
-    type: "KEBAKARAN",
-    danger: "KRITIS",
-    location: "Jl. Sudirman No. 45, Sektor C",
-    coords: { lat: -6.1818, lon: 106.8223 },
-    time: "14:05 WIB",
-    description: "Kebakaran aktif di lantai 3–5. Api sudah meluas ke gedung sebelah. Evakuasi darurat diperlukan.",
-    affected: 37,
-    status: "AKTIF",
-  },
-  {
-    id: 2,
-    name: "Longsor Jalur Evakuasi",
-    type: "BENCANA",
-    danger: "TINGGI",
-    location: "Jalur Utama Sektor A–B",
-    coords: { lat: -6.1858, lon: 106.8183 },
-    time: "13:42 WIB",
-    description: "Longsor menutup jalur utama evakuasi. Kendaraan berat tidak bisa melintas.",
-    affected: 12,
-    status: "DIPROSES",
-  },
-  {
-    id: 3,
-    name: "Korban Luka Berat",
-    type: "MEDIS",
-    danger: "TINGGI",
-    location: "Sektor C, Blok 4",
-    coords: { lat: -6.1798, lon: 106.8263 },
-    time: "13:10 WIB",
-    description: "Tiga orang terjebak dengan luka berat di reruntuhan lantai 2. Tim medis diminta segera.",
-    affected: 3,
-    status: "AKTIF",
-  },
-  {
-    id: 4,
-    name: "Kerusuhan Warga Posko",
-    type: "KEAMANAN",
-    danger: "SEDANG",
-    location: "Posko Induk Selatan",
-    coords: { lat: -6.1838, lon: 106.8243 },
-    time: "12:30 WIB",
-    description: "Kerumunan warga tidak terkontrol di posko induk. Diperlukan koordinasi distribusi bantuan.",
-    affected: 80,
-    status: "DIPROSES",
-  },
-  {
-    id: 5,
-    name: "Bocor Gas LPG",
-    type: "KEAMANAN",
-    danger: "SEDANG",
-    location: "Perumahan Blok F-12",
-    coords: { lat: -6.1808, lon: 106.8203 },
-    time: "11:55 WIB",
-    description: "Bocor gas terdeteksi di kawasan perumahan padat penduduk. Area sudah dikosongkan.",
-    affected: 15,
-    status: "TERKENDALI",
-  },
-];
+const KIND_TO_TYPE: Record<HazardKind, EventType> = {
+  fire: "KEBAKARAN",
+  blocked: "BENCANA",
+  medical: "MEDIS",
+  crash: "KEAMANAN",
+  theft: "KEAMANAN",
+};
+
+const SEVERITY_TO_DANGER: Record<HazardSeverity, DangerLevel> = {
+  critical: "KRITIS",
+  warning: "TINGGI",
+  info: "SEDANG",
+};
 
 const DANGER_CONFIG: Record<DangerLevel, {
   label: string;
@@ -155,9 +112,132 @@ function DangerBar({ level, color }: { level: number; color: string }) {
   );
 }
 
+/**
+ * The field unit's own controls on an incident card: take the job on your
+ * own initiative (self-assign — then radar doesn't send anyone else), report
+ * it done (→ awaiting radar confirmation), or just navigate. Mirrors exactly
+ * what radar's Status Taktis shows for the same incident.
+ */
+function TaskActions({
+  hazard,
+  color,
+  border,
+  bg,
+}: {
+  hazard: HazardData;
+  color: string;
+  border: string;
+  bg: string;
+}) {
+  const { coords } = useDeviceLocation();
+  const [self] = useState(getSelfRanger);
+  const tasks = useTasksStore((s) => s.tasks);
+  const resolved = useTasksStore((s) => s.resolvedHazards);
+  const selfAssign = useTasksStore((s) => s.selfAssign);
+  const reportDone = useTasksStore((s) => s.reportDone);
+
+  const task = tasks[hazard.id];
+  const isResolved = Boolean(resolved[hazard.id]);
+  // This unit is unavailable to take a new job if it's already on one.
+  const busyElsewhere = Object.values(tasks).some(
+    (t) => t.rangerId === self.id && t.hazardId !== hazard.id && t.status !== "reported",
+  );
+
+  if (isResolved) {
+    return (
+      <div className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#66df75] bg-[#66df75]/10 text-[#66df75] font-mono text-xs uppercase tracking-wider">
+        <CheckCircle2 size={12} /> Selesai · dikonfirmasi HQ
+      </div>
+    );
+  }
+
+  if (task?.status === "reported") {
+    return (
+      <div className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#fabd00] bg-[#fabd00]/10 text-[#fabd00] font-mono text-xs uppercase tracking-wider">
+        <Loader2 size={12} className="animate-spin" /> Menunggu konfirmasi HQ
+      </div>
+    );
+  }
+
+  // A unit is on it (this one or another) — offer "done" only to the unit
+  // actually handling it, never a second dispatch.
+  if (task) {
+    const mine = task.rangerId === self.id;
+    if (mine) {
+      return (
+        <button
+          type="button"
+          onClick={() => reportDone(hazard.id, hazard)}
+          className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#66df75] bg-[#66df75]/10 text-[#66df75] font-mono text-xs uppercase tracking-wider hover:brightness-125 active:scale-95 transition-all"
+        >
+          <CheckCircle2 size={12} /> Tandai Selesai
+        </button>
+      );
+    }
+    return (
+      <div className="w-full flex items-center justify-center gap-2 py-2.5 border border-[#444] bg-[#1a1a1a] text-[#5fb3b3] font-mono text-xs uppercase tracking-wider">
+        Ditangani {task.rangerName} ({task.callsign})
+      </div>
+    );
+  }
+
+  // Nobody on it yet — take it yourself (radar then won't send anyone).
+  return (
+    <button
+      type="button"
+      disabled={!coords || busyElsewhere}
+      onClick={() =>
+        coords &&
+        selfAssign(
+          hazard.id,
+          self,
+          [coords.lat, coords.lon],
+          [coords.lat + hazard.offset[0], coords.lon + hazard.offset[1]],
+          hazard.label,
+        )}
+      className={`w-full flex items-center justify-center gap-2 py-2.5 border ${border} ${color} ${bg} font-mono text-xs uppercase tracking-wider hover:brightness-125 active:scale-95 transition-all disabled:opacity-40 disabled:active:scale-100`}
+    >
+      <Hand size={12} /> {busyElsewhere ? "Anda sedang bertugas" : "Ambil Tugas"}
+    </button>
+  );
+}
+
 export function DangerLevel() {
   const [filter, setFilter] = useState<DangerLevel | "SEMUA">("SEMUA");
   const [selected, setSelected] = useState<Event | null>(null);
+  const { coords } = useDeviceLocation();
+
+  // Same live incident feed radar dispatches from (offline-cached), with
+  // handling status derived from the shared task/resolution stores — a unit
+  // in the field sees exactly what the command center sees.
+  const { data: hazards = [] } = useIncidents();
+  const tasks = useTasksStore((s) => s.tasks);
+  const resolved = useTasksStore((s) => s.resolvedHazards);
+
+  const EVENTS: Event[] = useMemo(
+    () =>
+      hazards.map((h) => {
+        const status: Event["status"] = resolved[h.id]
+          ? "TERKENDALI"
+          : tasks[h.id]
+          ? "DIPROSES"
+          : "AKTIF";
+        const location = coords
+          ? formatCoords(coords.lat + h.offset[0], coords.lon + h.offset[1])
+          : "Menunggu GPS...";
+        return {
+          id: h.id,
+          name: h.label,
+          type: KIND_TO_TYPE[h.kind],
+          danger: SEVERITY_TO_DANGER[h.severity],
+          location,
+          time: h.time,
+          description: h.description,
+          status,
+        };
+      }),
+    [hazards, tasks, resolved, coords?.lat, coords?.lon],
+  );
 
   const filtered = EVENTS.filter((e) => filter === "SEMUA" || e.danger === filter);
 
@@ -278,9 +358,11 @@ export function DangerLevel() {
                       {event.status}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1 text-[#555] font-mono text-[9px]">
-                    <span>{event.affected} terdampak</span>
-                  </div>
+                  {event.affected !== undefined && (
+                    <div className="flex items-center gap-1 text-[#555] font-mono text-[9px]">
+                      <span>{event.affected} terdampak</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Expanded details */}
@@ -297,10 +379,12 @@ export function DangerLevel() {
                         <p className="font-mono text-xs text-[#c0b0b3] leading-relaxed">
                           {event.description}
                         </p>
-                        <button className={`w-full flex items-center justify-center gap-2 py-2.5 border ${cfg.border} ${cfg.color} ${cfg.bg} font-mono text-xs uppercase tracking-wider hover:brightness-125 active:scale-95 transition-all`}>
-                          <Navigation size={12} />
-                          Navigasi ke Lokasi
-                        </button>
+                        {(() => {
+                          const hazard = hazards.find((h) => h.id === event.id);
+                          return hazard ? (
+                            <TaskActions hazard={hazard} color={cfg.color} border={cfg.border} bg={cfg.bg} />
+                          ) : null;
+                        })()}
                       </div>
                     </motion.div>
                   )}

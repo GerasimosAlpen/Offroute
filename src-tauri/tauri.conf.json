@@ -13,12 +13,16 @@
     "windows": [
       {
         "title": "Offroute",
-        "width": 800,
-        "height": 600
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1024,
+        "minHeight": 640,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; connect-src ipc: http://ipc.localhost http://localhost:3000 ws://localhost:3000 https://nominatim.openstreetmap.org https://data.bmkg.go.id https://router.project-osrm.org"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.basemaps.cartocdn.com; connect-src ipc: http://ipc.localhost http://localhost:3000 ws://localhost:3000 https://nominatim.openstreetmap.org https://data.bmkg.go.id https://router.project-osrm.org https://ipwho.is https://ipapi.co"
     }
   },
   "bundle": {
