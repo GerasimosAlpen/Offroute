@@ -1,5 +1,7 @@
 import { Module } from "@nestjs/common";
 import { ConfigModule } from "@nestjs/config";
+import { AppController } from "./app.controller";
+import { AppService } from "./app.service";
 import { PrismaModule } from "./prisma/prisma.module";
 import { PersonnelModule } from "./personnel/personnel.module";
 import { IncidentsModule } from "./incidents/incidents.module";
@@ -23,5 +25,7 @@ import { VictimsModule } from "./victims/victims.module";
     CommsModule,
     VictimsModule,
   ],
+  controllers: [AppController],
+  providers: [AppService],
 })
 export class AppModule {}

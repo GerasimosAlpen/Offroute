@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import { PrismaService } from "../prisma/prisma.service";
+import { PrismaService, type PrismaTx } from "../prisma/prisma.service";
 import { EventsGateway } from "../gateway/events.gateway";
 
 @Injectable()
@@ -14,18 +14,30 @@ export class FlareService {
   }
 
   async activate() {
-    const last = await this.getCurrent();
-    const nextSeq = last ? last.sequence + 1 : 1;
+    // Sequence read + create in one SERIALIZABLE transaction, and activation
+    // is idempotent while a FLARE is already active — two concurrent
+    // activations would otherwise both read the same latest sequence and
+    // create two simultaneously-active alerts with duplicate numbers.
+    const { flare, created } = await this.prisma.$transaction(
+      async (tx: PrismaTx) => {
+        const last = await tx.flareAlert.findFirst({ orderBy: { createdAt: "desc" } });
+        if (last && last.status === "active") return { flare: last, created: false };
+        const nextSeq = last ? last.sequence + 1 : 1;
+        const fresh = await tx.flareAlert.create({
+          data: { status: "active", sequence: nextSeq },
+        });
+        return { flare: fresh, created: true };
+      },
+      { isolationLevel: "Serializable" },
+    );
 
-    const flare = await this.prisma.flareAlert.create({
-      data: { status: "active", sequence: nextSeq },
-    });
-
-    this.gateway.emit("flare-broadcast", {
-      flareId: flare.id,
-      sequence: flare.sequence,
-      status: flare.status,
-    });
+    if (created) {
+      this.gateway.emit("flare-broadcast", {
+        flareId: flare.id,
+        sequence: flare.sequence,
+        status: flare.status,
+      });
+    }
 
     return flare;
   }

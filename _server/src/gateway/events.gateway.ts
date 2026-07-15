@@ -8,6 +8,7 @@ import {
   MessageBody,
 } from "@nestjs/websockets";
 import { Server, Socket } from "socket.io";
+import { CORS_ORIGINS } from "../cors";
 
 export interface PresenceEntry {
   rangerId: string;
@@ -15,6 +16,9 @@ export interface PresenceEntry {
   callsign: string;
   lastSeen: number;
   dutyStatus: "on_duty" | "idle";
+  /** Live GPS position, when the unit's device shared one with its heartbeat. */
+  lat?: number;
+  lon?: number;
 }
 
 /**
@@ -22,11 +26,15 @@ export interface PresenceEntry {
  * emit realtime events to all connected frontend clients.
  *
  * Events emitted (Server → Client):
- *  - task-update       { hazardId, rangerId, status, unitLat, unitLon }
+ *  - task-update       { hazardId, rangerId, status, unitLat, unitLon, rangerName?, callsign?, selfAssigned? }
+ *  - task-confirmed    { hazardId, rangerId, rangerName, callsign } — radar confirmed a completion report
+ *  - task-rejected     { hazardId, rangerId, rangerName, callsign } — radar sent the unit back to keep working
  *  - ranger-position   { rangerId, lat, lon }
  *  - flare-broadcast   { flareId, sequence, status }
  *  - evac-request      EvacuationRequest payload
+ *  - evac-request-decided { id, accepted } — radar accepted/rejected a pending request
  *  - evac-confirmed    EvacuationPoint payload
+ *  - evac-removed      { id } — radar removed a confirmed evacuation point
  *  - message-pin       MessagePin payload
  *  - comms-message     CommEntry payload
  *  - incident-new      Incident payload
@@ -35,13 +43,15 @@ export interface PresenceEntry {
  *  - victim-rescued    { id } — radar marked a victim as found
  *
  * Events received (Client → Server):
- *  - presence-heartbeat  { rangerId, name, callsign } — personel pings this
- *    periodically while its app is open; not persisted, purely in-memory,
- *    so radar can tell who's actually online vs gone silent right now.
+ *  - presence-heartbeat  { rangerId, name, callsign, dutyStatus?, lat?, lon? }
+ *    — personel pings this periodically (and on GPS movement) while its app
+ *    is open; not persisted, purely in-memory, so radar can tell who's
+ *    actually online vs gone silent right now, and where each live unit
+ *    physically is.
  */
 @WebSocketGateway({
   cors: {
-    origin: ["http://localhost:1420", "tauri://localhost"],
+    origin: CORS_ORIGINS,
     credentials: true,
   },
 })
@@ -68,10 +78,30 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage("presence-heartbeat")
   handlePresenceHeartbeat(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { rangerId: string; name: string; callsign: string; dutyStatus?: "on_duty" | "idle" },
+    @MessageBody()
+    body: {
+      rangerId: string;
+      name: string;
+      callsign: string;
+      dutyStatus?: "on_duty" | "idle";
+      lat?: number;
+      lon?: number;
+    },
   ) {
     if (!body || typeof body.rangerId !== "string") return; // malformed payload, ignore rather than throw
-    this.presence.set(client.id, { ...body, dutyStatus: body.dutyStatus ?? "on_duty", lastSeen: Date.now() });
+    // Coordinates only pass through as a validated pair — a heartbeat with
+    // junk position data degrades to a plain presence ping, never NaN on maps.
+    const hasPos =
+      typeof body.lat === "number" && Number.isFinite(body.lat) && Math.abs(body.lat) <= 90 &&
+      typeof body.lon === "number" && Number.isFinite(body.lon) && Math.abs(body.lon) <= 180;
+    this.presence.set(client.id, {
+      rangerId: body.rangerId,
+      name: body.name,
+      callsign: body.callsign,
+      dutyStatus: body.dutyStatus ?? "on_duty",
+      lastSeen: Date.now(),
+      ...(hasPos ? { lat: body.lat, lon: body.lon } : {}),
+    });
     this.broadcastPresence();
   }
 

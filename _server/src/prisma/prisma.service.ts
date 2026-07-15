@@ -35,6 +35,15 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get flareDispatch() { return this.client.flareDispatch; }
   get victim() { return this.client.victim; }
 
+  /**
+   * Interactive transaction passthrough — check-then-write flows (task
+   * assignment, FLARE activation) need atomicity or concurrent requests
+   * both pass their guards. Works with the pgbouncer transaction-mode
+   * pooler: the pg adapter pins each transaction to one connection.
+   * Keep transactions short.
+   */
+  get $transaction() { return this.client.$transaction.bind(this.client); }
+
   async onModuleInit() {
     await this.client.$connect();
   }
@@ -44,3 +53,6 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     await this.pool.end();
   }
 }
+
+/** Model surface available inside an interactive $transaction callback. */
+export type PrismaTx = Omit<PrismaService, "$transaction" | "onModuleInit" | "onModuleDestroy">;
