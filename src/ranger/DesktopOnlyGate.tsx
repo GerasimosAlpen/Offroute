@@ -8,7 +8,7 @@ export function DesktopOnlyGate({ children }: { children: ComponentChildren }) {
   if (isDesktop) return <>{children}</>;
 
   return (
-    <div class="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center px-6">
+    <div class="min-h-dvh bg-zinc-950 text-zinc-100 flex items-center justify-center px-6">
       <div class="max-w-sm text-center flex flex-col items-center gap-3">
         <MonitorSmartphone size={32} class="text-zinc-500" />
         <h1 class="text-sm font-semibold text-white">Desktop only</h1>

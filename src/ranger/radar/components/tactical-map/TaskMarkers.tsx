@@ -18,12 +18,13 @@ export function TaskMarkers() {
   return (
     <>
       {Object.values(tasks).flatMap((task) => {
-        const rangerProfile = personnel.find((r) => r.id === task.rangerId);
-        const label = rangerProfile
-          ? task.status === "arrived"
-            ? `${rangerProfile.name} · TIBA`
-            : rangerProfile.name
-          : "";
+        const name = personnel.find((r) => r.id === task.rangerId)?.name ?? task.rangerName;
+        const label =
+          task.status === "reported"
+            ? `${name} · SELESAI?`
+            : task.status === "onscene"
+              ? `${name} · DI LOKASI`
+              : name;
         const layers = [];
         // Minor ad-hoc hazards (fire/crash/theft/etc.) are the routine, not
         // the drama — kept thin and dim, not the bright flowing style

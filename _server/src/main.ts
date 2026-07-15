@@ -3,13 +3,14 @@ import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
 import { IoAdapter } from "@nestjs/platform-socket.io";
 import { AppModule } from "./app.module";
+import { CORS_ORIGINS } from "./cors";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   // ─── CORS ──────────────────────────────────────────────────────────────────
   app.enableCors({
-    origin: ["http://localhost:1420", "tauri://localhost"],
+    origin: CORS_ORIGINS,
     methods: ["GET", "POST", "PATCH", "DELETE"],
     credentials: true,
   });

@@ -2,16 +2,11 @@ import { useEffect, useState } from "preact/hooks";
 import { LifeBuoy, ChevronUp, ChevronDown } from "lucide-preact";
 import { useVictimsStore } from "@/store/victims";
 import { getSelfRanger } from "@/lib/rangers";
+import { metersBetween } from "@/lib/routing";
+import { formatDistance } from "@/lib/format";
 
 function distanceLabel(userPos: [number, number], lat: number, lon: number): string {
-  const R = 6371000;
-  const dLat = ((lat - userPos[0]) * Math.PI) / 180;
-  const dLon = ((lon - userPos[1]) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((userPos[0] * Math.PI) / 180) * Math.cos((lat * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  const meters = 2 * R * Math.asin(Math.sqrt(a));
-  return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+  return formatDistance(metersBetween(userPos, [lat, lon]));
 }
 
 /**

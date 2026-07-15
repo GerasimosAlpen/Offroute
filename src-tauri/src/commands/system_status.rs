@@ -47,6 +47,14 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
         .output()
         .map_err(|e| e.to_string())?;
 
+    if !output.status.success() {
+        return Err(format!(
+            "system_profiler exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
 

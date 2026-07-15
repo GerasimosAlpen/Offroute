@@ -13,6 +13,7 @@ import { useEvacuationPointsStore } from "@/store/evacuationPoints";
 import { useEvacuationRequestsStore } from "@/store/evacuationRequests";
 import { useOnlineStatus } from "@/lib/useOnlineStatus";
 import { initOfflineCache, retryQueuedMutations } from "@/lib/offlineCache";
+import { socket } from "@/lib/socket";
 
 /**
  * App-level initializer — fires once on mount to sync backend state into
@@ -33,6 +34,16 @@ function AppInit() {
     void useEvacuationRequestsStore.getState().loadPending();
     // Set up the local SQLite cache (no-op outside Tauri)
     void initOfflineCache();
+
+    // The operator reseeded the database from the System Monitor — the
+    // simplest correct way to get every store/query on every client back to a
+    // clean, consistent state is a full reload (the `loaded` guards otherwise
+    // keep the old data). This is an explicit, rare admin action.
+    const onReset = () => window.location.reload();
+    socket.on("data-reset", onReset);
+    return () => {
+      socket.off("data-reset", onReset);
+    };
   }, []);
 
   // Fires once on mount too if already online — flushes anything queued

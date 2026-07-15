@@ -88,6 +88,13 @@ export const useEvacuationRequestsStore = create<EvacuationRequestsState>((set, 
     }
   });
 
+  // Another radar client decided (accepted/rejected) a pending request —
+  // drop the card here too instead of showing it stale until a refetch.
+  socket.on("evac-request-decided", (payload: { id: string; accepted: boolean }) => {
+    if (!payload || typeof payload.id !== "string") return; // malformed payload, ignore rather than throw
+    set((s) => ({ pending: s.pending.filter((p) => p.id !== payload.id) }));
+  });
+
   return {
     pending: [],
     loaded: false,

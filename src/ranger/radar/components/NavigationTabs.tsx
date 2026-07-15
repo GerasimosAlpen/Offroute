@@ -4,6 +4,8 @@ import {
   Sparkle,
   Sparkles,
   LayoutGrid,
+  Activity,
+  TerminalSquare,
   Settings,
 } from "lucide-preact";
 import { NavItem } from "./NavItem";
@@ -17,6 +19,8 @@ const NAV_ITEMS = [
   { href: "/ranger/radar/incident", label: "Lapor Incident", icon: Sparkle },
   { href: "/ranger/radar/comm", label: "Comm Center", icon: Sparkles },
   { href: "/ranger/radar/status", label: "Sector Status", icon: LayoutGrid },
+  { href: "/ranger/radar/monitor", label: "Monitor Sistem", icon: Activity },
+  { href: "/ranger/radar/terminal", label: "Terminal", icon: TerminalSquare },
 ];
 
 const FOOTER_ITEMS = [

@@ -1,6 +1,5 @@
 import { io, type Socket } from "socket.io-client";
-
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000";
+import { getApiBaseUrl } from "./apiBase";
 
 /**
  * Singleton Socket.IO client.
@@ -10,10 +9,15 @@ const API_URL = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://
  *   import { socket } from "@/lib/socket";
  *   socket.on("comms-message", (payload) => { ... });
  */
-export const socket: Socket = io(API_URL, {
+export const socket: Socket = io(getApiBaseUrl(), {
   autoConnect: true,
-  reconnectionAttempts: 10,
+  // Retry forever — disaster-zone connectivity is intermittent by nature,
+  // and a client that silently gives up after N attempts stays offline for
+  // good even when the network comes back. (A capped attempt count here was
+  // exactly that bug.)
+  reconnection: true,
   reconnectionDelay: 2000,
+  reconnectionDelayMax: 30_000,
   transports: ["websocket"],
 });
 

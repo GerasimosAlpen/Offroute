@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException, BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { EventsGateway } from "../gateway/events.gateway";
 import { SosPingDto, RangerRefDto } from "./dto/victim.dto";
@@ -61,6 +61,7 @@ export class VictimsService {
   async confirmRescue(id: string) {
     const victim = await this.prisma.victim.findUnique({ where: { id } });
     if (!victim) throw new NotFoundException(`Victim ${id} not found`);
+    if (victim.status === "rescued") return victim; // idempotent — no re-emit
     const updated = await this.prisma.victim.update({ where: { id }, data: { status: "rescued" } });
     this.gateway.emit("victim-rescued", { id });
     return updated;
@@ -69,6 +70,12 @@ export class VictimsService {
   private async updateAndBroadcast(id: string, data: Record<string, string | null>) {
     const victim = await this.prisma.victim.findUnique({ where: { id } });
     if (!victim) throw new NotFoundException(`Victim ${id} not found`);
+    // A late field report or dispatch against an already-confirmed rescue
+    // must not re-broadcast `victim-sos` — that resurrects the victim onto
+    // every client's active SOS list.
+    if (victim.status === "rescued") {
+      throw new BadRequestException(`Victim ${id} already rescued`);
+    }
     const updated = await this.prisma.victim.update({ where: { id }, data });
     this.gateway.emit("victim-sos", updated);
     return updated;

@@ -1,16 +1,54 @@
 import axios from "axios";
+import { getApiBaseUrl } from "./apiBase";
 
 /**
  * Axios client pointed at the NestJS backend.
- * Base URL is configurable via VITE_API_URL env var (default: localhost:3000).
+ * Base URL resolution (runtime override → env → localhost) lives in apiBase.ts.
  */
 export const api = axios.create({
-  baseURL: (import.meta.env.VITE_API_URL as string | undefined) ?? "http://localhost:3000",
+  baseURL: getApiBaseUrl(),
   timeout: 10_000,
   headers: { "Content-Type": "application/json" },
 });
 
 // ─── Typed API helpers ────────────────────────────────────────────────────────
+
+export interface HealthResult {
+  ok: boolean;
+  db: boolean;
+  latencyMs: number;
+}
+
+export const healthApi = {
+  /** Times a liveness+DB probe. Never throws — an unreachable API resolves to ok:false. */
+  ping: async (): Promise<HealthResult> => {
+    const started = performance.now();
+    try {
+      const r = await api.get<{ ok: boolean; db: boolean }>("/health", { timeout: 5000 });
+      return { ok: Boolean(r.data?.ok), db: Boolean(r.data?.db), latencyMs: Math.round(performance.now() - started) };
+    } catch {
+      return { ok: false, db: false, latencyMs: Math.round(performance.now() - started) };
+    }
+  },
+};
+
+export interface DbStats {
+  personnel: number;
+  incidents: number;
+  tasks: number;
+  resolved: number;
+  victims: number;
+  evacPoints: number;
+  evacRequests: number;
+  comms: number;
+  messagePins: number;
+  flares: number;
+}
+
+export const adminApi = {
+  stats:  () => api.get<DbStats>("/admin/stats").then((r) => r.data),
+  reseed: () => api.post<{ ok: boolean } & DbStats>("/admin/reseed").then((r) => r.data),
+};
 
 export const personnelApi = {
   list: () => api.get<Personnel[]>("/personnel").then((r) => r.data),
@@ -24,8 +62,12 @@ export const incidentsApi = {
 
 export const tasksApi = {
   list:           () => api.get("/tasks").then((r) => r.data),
+  resolved:       () => api.get("/tasks/resolved").then((r) => r.data),
   assign:         (dto: AssignTaskDto) => api.post("/tasks/assign", dto).then((r) => r.data),
+  selfAssign:     (dto: SelfAssignTaskDto) => api.post("/tasks/self-assign", dto).then((r) => r.data),
   updateStatus:   (id: string, dto: UpdateTaskStatusDto) => api.patch(`/tasks/${id}/status`, dto).then((r) => r.data),
+  confirm:        (id: string) => api.post(`/tasks/${id}/confirm`).then((r) => r.data),
+  reject:         (id: string) => api.post(`/tasks/${id}/reject`).then((r) => r.data),
   updatePosition: (id: string, lat: number, lon: number) => api.post(`/tasks/${id}/position`, { lat, lon }).then((r) => r.data),
 };
 
@@ -99,6 +141,13 @@ export interface AssignTaskDto {
   hazardId: string;
   baseLat: number;
   baseLon: number;
+}
+
+export interface SelfAssignTaskDto {
+  hazardId: string;
+  rangerId: string;
+  unitLat: number;
+  unitLon: number;
 }
 
 export interface UpdateTaskStatusDto {

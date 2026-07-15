@@ -119,16 +119,6 @@ export function buildRangerIcon(label: string) {
   });
 }
 
-export const MESSAGE_PIN_ICON = L.divIcon({
-  className: "",
-  html: `
-    <div style="position:relative;width:20px;height:20px;transform:translate(-50%,-100%);display:flex;align-items:center;justify-content:center;">
-      <div style="width:20px;height:20px;border-radius:9999px 9999px 9999px 2px;background:#e5e2e1;border:2px solid #131313;transform:rotate(45deg);"></div>
-    </div>
-  `,
-  iconSize: [0, 0],
-});
-
 export const EVAC_POINT_ICON = L.divIcon({
   className: "",
   html: `

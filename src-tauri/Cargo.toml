@@ -28,7 +28,7 @@ tauri-plugin-os = "2.3.2"
 starship-battery = "0.11.1"
 tauri-plugin-store = "2.4.3"
 btleplug = "0.11"
-tokio = { version = "1", features = ["sync"] }
+tokio = { version = "1", features = ["sync", "process", "time"] }
 uuid = "1"
 futures = "0.3"
 

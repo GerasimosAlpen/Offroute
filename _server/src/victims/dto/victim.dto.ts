@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsOptional } from "class-validator";
+import { IsString, IsNumber, IsOptional, Max, Min } from "class-validator";
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 
 export class SosPingDto {
@@ -13,10 +13,14 @@ export class SosPingDto {
 
   @ApiProperty({ example: -6.2088 })
   @IsNumber()
+  @Min(-90)
+  @Max(90)
   lat: number;
 
   @ApiProperty({ example: 106.8456 })
   @IsNumber()
+  @Min(-180)
+  @Max(180)
   lon: number;
 }
 

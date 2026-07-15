@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { Radio, WifiOff, PhoneCall, Siren, CheckCircle2 } from "lucide-preact";
-import { useCommsLogStore } from "@/store/commsLog";
+import { useCommsLog } from "@/hooks/useCommsLog";
 import { useOnlineStatus } from "@/lib/useOnlineStatus";
 import { useDeviceLocation } from "@/store/location";
 import { getSelfRanger } from "@/lib/rangers";
 import { useDutyStatusStore } from "@/store/dutyStatus";
+import { useMessagePinsStore } from "@/store/messagePins";
 import { ChatBubble } from "@/ranger/comms/ChatBubble";
 import { BluetoothStatusBar } from "@/ranger/comms/BluetoothStatusBar";
 
@@ -29,10 +30,7 @@ const EMERGENCY_TEL = "112";
  * without needing a schema change for real 1:1 channels.
  */
 export function Komunikasi() {
-  const entries = useCommsLogStore((s) => s.entries);
-  const loaded = useCommsLogStore((s) => s.loaded);
-  const append = useCommsLogStore((s) => s.append);
-  const loadHistory = useCommsLogStore((s) => s.loadHistory);
+  const { entries, loaded, append, baselineCountRef } = useCommsLog();
   const online = useOnlineStatus();
   const { coords } = useDeviceLocation();
   const [draft, setDraft] = useState("");
@@ -58,16 +56,19 @@ export function Komunikasi() {
       lead: "MINTA BACKUP",
       body: `butuh bantuan tambahan segera di lokasi saat ini.${posSuffix}`,
     });
-  };
-
-  useEffect(() => { void loadHistory(); }, [loadHistory]);
-
-  const baselineCountRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (loaded && baselineCountRef.current === null) {
-      baselineCountRef.current = useCommsLogStore.getState().entries.length;
+    // Also drop it on radar's map, not just the chat, so HQ can see *where*
+    // backup is needed and dispatch a unit to that spot.
+    if (coords) {
+      useMessagePinsStore.getState().addPin({
+        rangerId: self.id,
+        rangerName: self.name,
+        callsign: self.callsign,
+        text: "MINTA BACKUP — butuh bantuan tambahan segera di lokasi ini.",
+        lat: coords.lat,
+        lon: coords.lon,
+      });
     }
-  }, [loaded]);
+  };
 
   const contacts = useMemo(() => {
     const seen = new Set<string>();
@@ -77,9 +78,14 @@ export function Komunikasi() {
     return Array.from(seen);
   }, [entries, selfLabel]);
 
+  // Keep each entry's index in the unfiltered log as its identity — the log
+  // is append-only, so that index is stable across contact-filter changes
+  // (an array-position key would hand a bubble's decrypt state to whatever
+  // entry slides into that position after filtering).
   const visibleEntries = useMemo(() => {
-    if (contact === ALL_CONTACTS) return entries;
-    return entries.filter((e) => e.sender === contact || e.sender === selfLabel);
+    const indexed = entries.map((entry, logIndex) => ({ entry, logIndex }));
+    if (contact === ALL_CONTACTS) return indexed;
+    return indexed.filter(({ entry: e }) => e.sender === contact || e.sender === selfLabel);
   }, [entries, contact, selfLabel]);
 
   useEffect(() => {
@@ -182,12 +188,12 @@ export function Komunikasi() {
             <Radio size={11} className="animate-pulse" /> memuat log komunikasi...
           </span>
         )}
-        {visibleEntries.map((entry, i) => (
+        {visibleEntries.map(({ entry, logIndex }) => (
           <ChatBubble
-            key={i}
+            key={logIndex}
             entry={entry}
             selfLabel={selfLabel}
-            animate={baselineCountRef.current !== null && entries.indexOf(entry) >= baselineCountRef.current}
+            animate={baselineCountRef.current !== null && logIndex >= baselineCountRef.current}
           />
         ))}
         <div ref={endRef} />

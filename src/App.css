@@ -127,13 +127,47 @@
     }
   body {
     @apply bg-background text-foreground;
+    /* Lowest-spec phone hardening: no rubber-band scroll chaining or
+       browser-chrome text inflation, cleaner taps. */
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
     }
   button:not(:disabled), [role="button"]:not(:disabled) {
     cursor: pointer;
     }
   html {
     @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     }
+
+  /* Touch devices (phones — the highly-prioritized personel/warga path):
+     force ≥16px form controls so iOS never zooms the viewport on focus, which
+     is disorienting mid-emergency on a cheap small-screen phone. Scoped to
+     coarse pointers so the dense desktop radar console is unaffected. */
+  @media (pointer: coarse) {
+    input, textarea, select {
+      font-size: 16px;
+    }
+  }
+
+  /* Honor reduced-motion: on low-end phones (and for anyone who sets it) drop
+     the decorative CSS animations so scrolling stays smooth. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+/* Safe-area helpers for notched / gesture-bar phones. */
+@utility pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+@utility pt-safe {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
 }
 
 /* Bluetooth-mesh marker entrance (Leaflet divIcons aren't Preact-controlled after mount, so this has to be plain CSS rather than framer-motion) */

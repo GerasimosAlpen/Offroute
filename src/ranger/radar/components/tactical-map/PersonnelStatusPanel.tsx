@@ -3,25 +3,17 @@ import { Users, TriangleAlert } from "lucide-preact";
 import { RANGERS } from "@/lib/rangers";
 import { usePresenceStore } from "@/store/presence";
 import { raiseAlert } from "@/lib/alerts";
+import { formatRelativeAge } from "@/lib/format";
 
-const ONLINE_THRESHOLD_MS = 35_000; // one missed heartbeat (20s) plus slack
 const SILENT_THRESHOLD_MS = 90_000; // several missed heartbeats — worth flagging, not just stale
 
 type UnitStatus = "online" | "silent" | "offline";
 
 function statusOf(lastSeen: number | undefined, now: number): UnitStatus {
   if (lastSeen === undefined) return "offline";
-  const age = now - lastSeen;
-  if (age <= ONLINE_THRESHOLD_MS) return "online";
-  if (age <= SILENT_THRESHOLD_MS) return "online"; // small lag, not worth alarming over yet
-  return "silent";
-}
-
-function formatAge(lastSeen: number, now: number): string {
-  const secs = Math.floor((now - lastSeen) / 1000);
-  if (secs < 60) return `${secs} detik lalu`;
-  const mins = Math.floor(secs / 60);
-  return `${mins} menit lalu`;
+  // Anything under the silent threshold counts as online — a heartbeat or
+  // two of lag isn't worth alarming over.
+  return now - lastSeen <= SILENT_THRESHOLD_MS ? "online" : "silent";
 }
 
 const STATUS_STYLE: Record<UnitStatus, { dot: string; label: string; text: string }> = {
@@ -101,7 +93,7 @@ export function PersonnelStatusPanel() {
                     {ranger.name} <span className="text-[#888]">({ranger.callsign})</span>
                   </span>
                   <span className="text-[#666] text-[10px]">
-                    {presence ? formatAge(presence.lastSeen, now) : "belum pernah lapor"}
+                    {presence ? formatRelativeAge(presence.lastSeen, now) : "belum pernah lapor"}
                   </span>
                 </div>
               </div>
