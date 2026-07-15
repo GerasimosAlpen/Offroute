@@ -43,17 +43,23 @@ Pushed the radar's desktop metaphor hard, and gave it a real embedded browser.
   in-frame HTML on failure. CSP gained `frame-src 'self' http://localhost:3000`.
   **Verified live**: Wikipedia + example.com render through the proxy with
   links rewritten; blocked hosts return the friendly error page.
-- **Real in-app browser window for the heavy web.** Proxies fundamentally
-  can't render Google/YouTube (anti-framing, JS, DRM), so the Browser now
-  also has a **real webview window** (`open_browser_window` in control.rs —
-  a full Tauri webview, Offroute's own window, not the system browser) that
-  reaches anything. Split model: lightweight framable sites (Wikipedia, BMKG,
-  OSM) render **inline** via the proxy; **Google, YouTube, search, and any
-  JS-heavy site open in the real in-app window**. Search goes to Google there
-  (dropped the Wikipedia results page as the "search engine"). Each mode is
-  labelled; an `AppWindow` toolbar button pops the current inline page into
-  the real window. Rust compiles; the webview-window creation itself needs a
-  live `tauri dev` run to confirm (can't exercise the engine headlessly).
+- **Embedded native browser (no second window).** Proxies fundamentally
+  can't render Google/YouTube (anti-framing, JS, DRM), so the Browser embeds
+  a **native child webview inside the main radar window** — a full engine, no
+  separate OS window. Rust (`control.rs`): `browser_navigate` / `browser_bounds`
+  / `browser_hide` / `browser_close`, using Tauri's **`unstable`** feature
+  (`Window::add_child` / `get_webview`). The frontend (`WebBrowserPanel`) runs
+  a rAF loop syncing the webview's bounds to the panel's content rect
+  (inset 5px so the window's resize-handles stay grabbable), parks it
+  off-screen when the panel isn't the top window / is empty, and destroys it
+  on unmount. Search → Google in the embed. Web (non-Tauri) build falls back
+  to the proxy iframe.
+  - **Tradeoffs (accepted by the operator):** native webviews draw above the
+    DOM, so it's hidden whenever another window is on top; while a page is
+    loaded the content covers the window's inner area (resize via the 5px edge
+    strips, maximize, or tile); minimizing unmounts the panel so the page
+    resets. Uses an `unstable` Tauri API. **Needs a live `tauri dev` run to
+    confirm** — the embed/coordinate-sync can't be exercised headlessly.
 
 ## Control console: terminal, data reset, app control (2026-07-15)
 

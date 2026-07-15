@@ -50,7 +50,10 @@ pub fn run() {
             commands::control::restart_app,
             commands::control::quit_app,
             commands::control::write_report_file,
-            commands::control::open_browser_window,
+            commands::control::browser_navigate,
+            commands::control::browser_bounds,
+            commands::control::browser_hide,
+            commands::control::browser_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

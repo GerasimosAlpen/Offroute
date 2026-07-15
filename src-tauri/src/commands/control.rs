@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
+use tauri::webview::WebviewBuilder;
+use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewUrl};
 
 /// Restart the Offroute app itself. This is deliberately an *app* restart,
 /// not an OS reboot: rebooting the operator's machine mid-operation would be
@@ -18,31 +19,63 @@ pub fn quit_app(app: AppHandle) {
 }
 
 const BROWSER_LABEL: &str = "radar-browser";
+// Parked far off-screen to "hide" the embedded webview without destroying it.
+const OFFSCREEN: f64 = -20000.0;
 
-/// Open (or navigate) a REAL in-app browser window — a full webview engine,
-/// so Google, YouTube and other JS-heavy/anti-framing sites that an iframe
-/// proxy can never render all work. It's Offroute's own window (not the
-/// system browser) and reuses a single "radar-browser" window. The loaded
-/// remote page gets no Tauri IPC, so it's just a browser tab.
+/// A REAL browser engine embedded as a child webview *inside* the main radar
+/// window — not a second OS window. Google, YouTube and other JS-heavy /
+/// anti-framing sites that an iframe proxy can never render all work here.
+/// The frontend keeps it positioned over the Browser panel via `browser_bounds`.
+/// The loaded remote page gets no Tauri IPC — it's just a browser view.
 #[tauri::command]
-pub async fn open_browser_window(app: AppHandle, url: String) -> Result<(), String> {
+pub async fn browser_navigate(app: AppHandle, url: String) -> Result<(), String> {
     let parsed: Url = url.parse().map_err(|_| "URL tidak valid".to_string())?;
     if parsed.scheme() != "http" && parsed.scheme() != "https" {
         return Err("Hanya http/https yang diizinkan".to_string());
     }
 
-    if let Some(win) = app.get_webview_window(BROWSER_LABEL) {
-        win.navigate(parsed).map_err(|e| e.to_string())?;
-        let _ = win.set_focus();
+    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+        wv.navigate(parsed).map_err(|e| e.to_string())?;
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(&app, BROWSER_LABEL, WebviewUrl::External(parsed))
-        .title("Radar Browser")
-        .inner_size(1100.0, 780.0)
-        .build()
-        .map_err(|e| e.to_string())?;
+    let win = app
+        .get_window("main")
+        .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
+    win.add_child(
+        WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(parsed)),
+        LogicalPosition::new(OFFSCREEN, OFFSCREEN),
+        LogicalSize::new(800.0, 600.0),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Position + size the embedded browser over the Browser panel (logical px).
+#[tauri::command]
+pub fn browser_bounds(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+        wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+        wv.set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Park the embedded browser off-screen (when its panel is covered/minimized).
+#[tauri::command]
+pub fn browser_hide(app: AppHandle) {
+    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+        let _ = wv.set_position(LogicalPosition::new(OFFSCREEN, OFFSCREEN));
+    }
+}
+
+/// Destroy the embedded browser (leaving the tactical map page).
+#[tauri::command]
+pub fn browser_close(app: AppHandle) {
+    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+        let _ = wv.close();
+    }
 }
 
 /// Best-effort human "Downloads" location, falling back to the OS-provided
