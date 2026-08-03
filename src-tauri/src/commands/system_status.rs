@@ -9,6 +9,7 @@ pub struct BatteryStatus {
     pub available: bool,
 }
 
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn get_battery_status() -> Result<BatteryStatus, String> {
     let manager = starship_battery::Manager::new().map_err(|e| e.to_string())?;
@@ -25,6 +26,12 @@ pub fn get_battery_status() -> Result<BatteryStatus, String> {
         }
         _ => Ok(BatteryStatus { percent: 0, charging: false, available: false }),
     }
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub fn get_battery_status() -> Result<BatteryStatus, String> {
+    Ok(BatteryStatus { percent: 100, charging: true, available: false })
 }
 
 #[derive(Clone, Serialize)]
