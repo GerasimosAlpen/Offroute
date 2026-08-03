@@ -179,7 +179,7 @@ async function startWatching() {
     try {
       let perms = await checkPermissions();
       if (perms.location !== "granted") {
-        perms = await requestPermissions();
+        perms = await requestPermissions(["location"]);
       }
       
       if (perms.location === "granted" || perms.location === "prompt-with-rationale") {

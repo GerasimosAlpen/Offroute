@@ -3,7 +3,7 @@ import { isTauri } from "@/lib/tauri";
 import { TauriCard } from "@/components/demo/TauriCard";
 import { NotificationCard } from "@/components/demo/NotificationCard";
 import { SQLiteCard } from "@/components/demo/SQLiteCard";
-import { StrongholdCard } from "@/components/demo/StrongholdCard";
+
 import { ZustandCard } from "@/components/demo/ZustandCard";
 import { QueryCard } from "@/components/demo/QueryCard";
 import { ValibotCard } from "@/components/demo/ValibotCard";
@@ -80,7 +80,7 @@ export default function DemoPlayground() {
           <TauriCard />
           <NotificationCard />
           <SQLiteCard />
-          <StrongholdCard />
+
           <ZustandCard />
           <QueryCard />
           <ValibotCard />
