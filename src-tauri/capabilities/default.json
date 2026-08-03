@@ -13,13 +13,6 @@
     "sql:allow-select",
     "sql:allow-load",
     "sql:allow-close",
-    "stronghold:allow-create-client",
-    "stronghold:allow-initialize",
-    "stronghold:allow-destroy",
-    "stronghold:allow-save",
-    "stronghold:allow-execute-procedure",
-    "stronghold:allow-get-store-record",
-    "stronghold:allow-save-store-record",
-    "stronghold:allow-remove-store-record"
+    "geolocation:default"
   ]
 }

@@ -6,13 +6,14 @@ fn greet(name: &str) -> String {
     format!("Hello, {name}!")
 }
 
+/* 
 fn build_stronghold() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     use argon2::{Algorithm, Argon2, Params, Version};
     tauri_plugin_stronghold::Builder::new(|password| {
         let params = Params::new(19456, 2, 1, Some(32)).expect("invalid argon2 params");
         let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
         // Salt should be device-specific in production; swap with a persisted
-        // random salt. Left static deliberately for now — changing it makes
+        // random salt. Left static deliberately for now ?" changing it makes
         // every existing stronghold store permanently undecryptable, so the
         // swap needs a migration story, not a drive-by fix.
         let salt = b"offroute-key-v01";
@@ -24,15 +25,17 @@ fn build_stronghold() -> tauri::plugin::TauriPlugin<tauri::Wry> {
     })
     .build()
 }
+*/
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(build_stronghold())
+// .plugin(build_stronghold())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_geolocation::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(commands::bluetooth::BleState::default())
         .invoke_handler(tauri::generate_handler![
