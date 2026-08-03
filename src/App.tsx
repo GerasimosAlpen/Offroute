@@ -1,11 +1,13 @@
 import { useEffect } from "preact/hooks";
 import { Router, Switch, Route } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
-import DemoPlayground from "@/pages/DemoPlayground";
-import RadarPage from "@/ranger/radar/RadarPage";
-import PersonelPage from "@/ranger/personel/PersonelPage";
-import UserPage from "@/user/UserPage";
-import SosPage from "@/ranger/sos/SosPage";
+import { lazy, Suspense } from "preact/compat";
+
+const DemoPlayground = lazy(() => import("@/pages/DemoPlayground"));
+const RadarPage = lazy(() => import("@/ranger/radar/RadarPage"));
+const PersonelPage = lazy(() => import("@/ranger/personel/PersonelPage"));
+const UserPage = lazy(() => import("@/user/UserPage"));
+const SosPage = lazy(() => import("@/ranger/sos/SosPage"));
 import { loadFlareState } from "@/store/flare";
 import { useMessagePinsStore } from "@/store/messagePins";
 import { useTasksStore } from "@/store/tasks";
@@ -59,13 +61,15 @@ export default function App() {
   return (
     <Router hook={useHashLocation}>
       <AppInit />
-      <Switch>
-        <Route path="/ranger/radar/:tab?" component={RadarPage} />
-        <Route path="/ranger/personel/:tab?" component={PersonelPage} />
-        <Route path="/user/:tab?" component={UserPage} />
-        <Route path="/sos" component={SosPage} />
-        <Route path="/" component={DemoPlayground} />
-      </Switch>
+      <Suspense fallback={<div class="flex items-center justify-center h-screen bg-neutral-900 text-white font-mono text-sm animate-pulse">BOOTING OFFRT_OS...</div>}>
+        <Switch>
+          <Route path="/ranger/radar/:tab?" component={RadarPage} />
+          <Route path="/ranger/personel/:tab?" component={PersonelPage} />
+          <Route path="/user/:tab?" component={UserPage} />
+          <Route path="/sos" component={SosPage} />
+          <Route path="/" component={DemoPlayground} />
+        </Switch>
+      </Suspense>
     </Router>
   );
 }

@@ -29,35 +29,44 @@ const OFFSCREEN: f64 = -20000.0;
 /// The loaded remote page gets no Tauri IPC — it's just a browser view.
 #[tauri::command]
 pub async fn browser_navigate(app: AppHandle, url: String) -> Result<(), String> {
-    let parsed: Url = url.parse().map_err(|_| "URL tidak valid".to_string())?;
-    if parsed.scheme() != "http" && parsed.scheme() != "https" {
-        return Err("Hanya http/https yang diizinkan".to_string());
-    }
+    #[cfg(mobile)]
+    return Err("Embedded browser is only supported on desktop".to_string());
 
-    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
-        wv.navigate(parsed).map_err(|e| e.to_string())?;
-        return Ok(());
-    }
+    #[cfg(desktop)]
+    {
+        let parsed: Url = url.parse().map_err(|_| "URL tidak valid".to_string())?;
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err("Hanya http/https yang diizinkan".to_string());
+        }
 
-    let win = app
-        .get_window("main")
-        .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
-    win.add_child(
-        WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(parsed)),
-        LogicalPosition::new(OFFSCREEN, OFFSCREEN),
-        LogicalSize::new(800.0, 600.0),
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+        if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+            wv.navigate(parsed).map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+
+        let win = app
+            .get_window("main")
+            .ok_or_else(|| "jendela utama tidak ditemukan".to_string())?;
+        win.add_child(
+            WebviewBuilder::new(BROWSER_LABEL, WebviewUrl::External(parsed)),
+            LogicalPosition::new(OFFSCREEN, OFFSCREEN),
+            LogicalSize::new(800.0, 600.0),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 /// Position + size the embedded browser over the Browser panel (logical px).
 #[tauri::command]
 pub fn browser_bounds(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -> Result<(), String> {
-    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
-        wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
-        wv.set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))
-            .map_err(|e| e.to_string())?;
+    #[cfg(desktop)]
+    {
+        if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+            wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
+            wv.set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))
+                .map_err(|e| e.to_string())?;
+        }
     }
     Ok(())
 }
@@ -65,16 +74,22 @@ pub fn browser_bounds(app: AppHandle, x: f64, y: f64, width: f64, height: f64) -
 /// Park the embedded browser off-screen (when its panel is covered/minimized).
 #[tauri::command]
 pub fn browser_hide(app: AppHandle) {
-    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
-        let _ = wv.set_position(LogicalPosition::new(OFFSCREEN, OFFSCREEN));
+    #[cfg(desktop)]
+    {
+        if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+            let _ = wv.set_position(LogicalPosition::new(OFFSCREEN, OFFSCREEN));
+        }
     }
 }
 
 /// Destroy the embedded browser (leaving the tactical map page).
 #[tauri::command]
 pub fn browser_close(app: AppHandle) {
-    if let Some(wv) = app.get_webview(BROWSER_LABEL) {
-        let _ = wv.close();
+    #[cfg(desktop)]
+    {
+        if let Some(wv) = app.get_webview(BROWSER_LABEL) {
+            let _ = wv.close();
+        }
     }
 }
 
