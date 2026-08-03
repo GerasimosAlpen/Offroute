@@ -1,0 +1,205 @@
+name: "CI/CD Offroute"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  pr_inspector:
+    name: PR Inspector
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      authors: ${{ steps.get_authors.outputs.authors }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Get Commit Authors
+        id: get_authors
+        run: |
+          # Dapatkan semua author unik dari commit di PR ini
+          AUTHORS=$(git log --format='%an' origin/${{ github.base_ref }}..HEAD | sort -u | paste -sd ", " -)
+          echo "authors=$AUTHORS" >> $GITHUB_OUTPUT
+          echo "Daftar tersangka: $AUTHORS"
+
+      - name: Send PR Comment (Estimasi & Witch Hunt)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const authors = '${{ steps.get_authors.outputs.authors }}';
+            const body = `### Sedang Menginspeksi Perubahan Anda...\n\n**Daftar Pelaku Commit:** ${authors || 'Tidak diketahui'}\n\n **Estimasi Build Time:**\n-  **Android:** ~10-15 Menit\n-  **Windows:** ~5-10 Menit\n-  **Linux:** ~5-10 Menit\n\n⚠️ *Ingat: Jika build hancur, kita sudah tahu siapa yang harus diburu! (F*CK THEM UP!)* ⚔️`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            })
+
+  build_mobile:
+    name: 📱 Build Mobile (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+
+      - name: Install Cargo NDK
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: cargo install cargo-ndk
+
+      - name: Install dependencies (NPM)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npm ci
+
+      - name: Build Android APK
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: deno task tauri android build
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Offroute-Android-APK
+          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+          retention-days: 7
+
+  build_desktop:
+    name: Build Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows
+          - os: ubuntu-latest
+            target: linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Setup Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+
+      - name: Install dependencies (Linux only)
+        if: matrix.os == 'ubuntu-latest'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: npm ci
+
+      - name: Build Desktop App
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 30
+          max_attempts: 3
+          command: deno task tauri build
+
+      - name: Upload Windows Artifacts
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Offroute-Windows-EXE
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+
+      - name: Upload Linux Artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Offroute-Linux-Deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          retention-days: 7
+
+  report_results:
+    name: Final Report 
+    needs: [pr_inspector, build_mobile, build_desktop]
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compile Report
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const mobileStatus = '${{ needs.build_mobile.result }}';
+            const desktopStatus = '${{ needs.build_desktop.result }}';
+            const authors = '${{ needs.pr_inspector.outputs.authors }}';
+            
+            let statusIcon = (mobileStatus === 'success' && desktopStatus === 'success') ? '✅' : '❌';
+            
+            let body = `### ${statusIcon} Hasil Eksekusi CI/CD Offroute\n\n`;
+            
+            if (mobileStatus === 'success' && desktopStatus === 'success') {
+              body += `Selamat! Semua platform berhasil di-build tanpa masalah. 🙏\n`;
+              body += `> Silakan cek tab **Actions** > **Artifacts** di atas untuk mendownload mentahan APK, EXE, dan DEB.`;
+            } else {
+              body += `**Peringatan Keras!** Terdapat error saat proses build. 🚨\n\n`;
+              body += `- 📱 Status Android: **${mobileStatus}**\n`;
+              body += `- 💻 Status Desktop (Windows/Linux): **${desktopStatus}**\n\n`;
+              body += `**Tersangka Utama (Authors):** ${authors || 'Tidak diketahui'}\n`;
+              body += `\n> *Pesan Otomatis: Segera perbaiki kode Anda! Auto-heal 3x sudah gagal, cek log errornya langsung dan copy! F\*CK THEM UP! 🔪*`;
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            })
