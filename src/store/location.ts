@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { getPersisted, setPersisted } from "@/lib/persist";
 import { formatCoords } from "@/lib/format";
+import { watchPosition as tauriWatchPosition, checkPermissions, requestPermissions } from "@tauri-apps/plugin-geolocation";
 
 export type GeoStatus =
   | "cached"
@@ -167,13 +168,45 @@ async function loadCachedLabel() {
   }
 }
 
-function startWatching() {
+async function startWatching() {
   if (started) return;
   started = true;
 
   void loadCachedLabel();
 
-  if (!navigator.geolocation) {
+  // 1. Native Tauri App (Desktop/Mobile)
+  if ("__TAURI_INTERNALS__" in window) {
+    try {
+      let perms = await checkPermissions();
+      if (perms.location !== "granted") {
+        perms = await requestPermissions();
+      }
+      
+      if (perms.location === "granted" || perms.location === "prompt-with-rationale") {
+        // Start native GPS tracking
+        await tauriWatchPosition(
+          { enableHighAccuracy: true, timeout: 15_000, maximumAge: 30_000 },
+          (position) => {
+            if (position) {
+              hasLiveFix = true;
+              handleFix(position.coords.latitude, position.coords.longitude);
+            }
+          }
+        );
+        setTimeout(() => void tryIpFallback(), 6000);
+        return;
+      }
+    } catch (err) {
+      console.warn("Native geolocation failed:", err);
+    }
+    
+    // Fallback to IP if permissions denied or plugin fails
+    void tryIpFallback();
+    return;
+  }
+
+  // 2. Standard Web Browser
+  if (!navigator.geolocation || navigator.userAgent.toLowerCase().includes("android")) {
     void tryIpFallback();
     return;
   }
@@ -184,16 +217,14 @@ function startWatching() {
       handleFix(position.coords.latitude, position.coords.longitude);
     },
     () => {
-      // Any geolocation failure (denied, timeout, or the silent no-op the
-      // Tauri webview does) falls back to approximate IP location rather than
-      // leaving radar with no position at all.
+      // Any geolocation failure (denied, timeout) falls back to approximate IP location
       void tryIpFallback();
     },
     { enableHighAccuracy: true, maximumAge: 30_000, timeout: 15_000 },
   );
 
   // watchPosition can hang without ever firing either callback in some
-  // webviews (notably Tauri's) — so kick the IP fallback after a short wait
+  // webviews — so kick the IP fallback after a short wait
   // regardless, guarded so a real fix always wins.
   setTimeout(() => void tryIpFallback(), 6000);
 }
