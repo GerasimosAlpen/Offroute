@@ -206,7 +206,7 @@ async function startWatching() {
   }
 
   // 2. Standard Web Browser
-  if (!navigator.geolocation || navigator.userAgent.toLowerCase().includes("android")) {
+  if (!navigator.geolocation) {
     void tryIpFallback();
     return;
   }

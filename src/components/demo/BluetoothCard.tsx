@@ -17,14 +17,12 @@ export function BluetoothCard() {
     <Card
       icon={<Bluetooth size={14} />}
       title="Bluetooth (Tier 1 relay)"
-      badge="btleplug · NUS"
+      badge="btleplug/WebBLE · NUS"
       badgeColor="text-sky-400 border-sky-500/30 bg-sky-500/10"
-      tauriOnly
       delay={0.7}
     >
       <p class="text-xs text-zinc-500">
-        Real BLE central/client — scans and talks to nearby peripherals. Not yet
-        Offroute-to-Offroute (needs a peripheral role too, see TODO.md).
+        Real BLE central/client — scans and talks to nearby peripherals via native backend or Web Bluetooth API.
       </p>
 
       <button class={scanning ? ghostBtn : primaryBtn} onClick={() => void (scanning ? stopScan() : startScan())}>
@@ -54,8 +52,6 @@ export function BluetoothCard() {
           ))}
         </ul>
       )}
-
-      {!isTauri && <p class="text-xs font-mono text-zinc-600">No native shell — nothing to scan.</p>}
 
       {messages.length > 0 && (
         <ul class="flex flex-col gap-1 max-h-24 overflow-auto">
