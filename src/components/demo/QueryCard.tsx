@@ -3,11 +3,12 @@ import axios from "axios";
 import { RefreshCw, Loader2 } from "lucide-preact";
 import { Card } from "./Card";
 import { primaryBtn } from "./styles";
+import { getApiBaseUrl } from "@/lib/apiBase";
 
 export function QueryCard() {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["nestjs-health"],
-    queryFn: () => axios.get("http://localhost:3000/").then((r) => r.data),
+    queryFn: () => axios.get(getApiBaseUrl()).then((r) => r.data),
     enabled: false,
     retry: false,
   });
@@ -21,7 +22,7 @@ export function QueryCard() {
       delay={0.25}
     >
       <p class="text-xs text-zinc-500">
-        Server state + caching. Pings NestJS at <code class="text-zinc-400">:3000</code>.
+        Server state + caching. Pings the backend at <code class="text-zinc-400">{getApiBaseUrl()}</code>.
       </p>
       <button
         class={`${primaryBtn} flex items-center gap-1.5`}

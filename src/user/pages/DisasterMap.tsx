@@ -9,6 +9,7 @@ import {
 } from "react-leaflet";
 import { LocateFixed, Compass, Navigation, Zap } from "lucide-preact";
 import { StatusHeader } from "../components/StatusHeader";
+import { TILE_URL, DEFAULT_COORDS } from "@/lib/config";
 import { useDeviceLocation } from "@/store/location";
 import { useIncidents } from "@/hooks/useIncidents";
 import { useEvacuationPointsStore } from "@/store/evacuationPoints";
@@ -47,7 +48,7 @@ export function DisasterMap() {
   const [routeOption, setRouteOption] = useState<RouteOption | null>(null);
 
   const center: [number, number] = useMemo(
-    () => (coords ? [coords.lat, coords.lon] : [-6.1818, 106.8223]),
+    () => (coords ? [coords.lat, coords.lon] : DEFAULT_COORDS),
     [coords?.lat, coords?.lon],
   );
 
@@ -127,7 +128,7 @@ export function DisasterMap() {
               style={{ height: "100%", width: "100%", zIndex: 1 }}
             >
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                url={TILE_URL}
                 subdomains="abcd"
               />
               <Marker position={center} icon={SELF_ICON} />

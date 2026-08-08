@@ -3,6 +3,7 @@ import { getApiBaseUrl } from "@/lib/apiBase";
 import { healthApi, adminApi } from "@/lib/api";
 import { getQueuedMutations, retryQueuedMutations } from "@/lib/offlineCache";
 import { socket } from "@/lib/socket";
+import { APP_NAME, APP_VERSION } from "@/lib/config";
 import { useBluetoothStore } from "@/store/bluetooth";
 import { useLocationStore } from "@/store/location";
 import { useBmkgStore } from "@/store/bmkg";
@@ -77,7 +78,7 @@ export async function runTerminalCommand(
 
     case "about":
     case "version":
-      return out(`Offroute v0.1.0 — Ranger Command / Field System\nRuntime: ${isTauri ? "Tauri desktop" : "browser (web)"}`);
+      return out(`${APP_NAME} v${APP_VERSION} — Ranger Command / Field System\nRuntime: ${isTauri ? "Tauri desktop" : "browser (web)"}`);
 
     case "api":
       return out(getApiBaseUrl());

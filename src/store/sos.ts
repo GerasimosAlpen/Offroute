@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { victimsApi, type SosPingDto } from "@/lib/api";
+import { SOS_RETRY_MS } from "@/lib/timings";
 
 const DEVICE_ID_KEY = "offroute.sos.deviceId";
 const PENDING_KEY = "offroute.sos.pending";
-const RETRY_MS = 10_000;
 
 /** Stable per-device id so repeated pings from the same phone update one victim record instead of creating a new one each time. */
 export function getSosDeviceId(): string {
@@ -73,7 +73,7 @@ export const useSosStore = create<SosStoreState>((set) => {
     retryTimer = setInterval(() => {
       const pending = getPending();
       if (pending) void attemptSend(pending);
-    }, RETRY_MS);
+    }, SOS_RETRY_MS);
   };
 
   if (typeof window !== "undefined") {

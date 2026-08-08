@@ -3,8 +3,7 @@ import { LifeBuoy, MapPin, WifiOff } from "lucide-preact";
 import { useDeviceLocation } from "@/store/location";
 import { useSosStore } from "@/store/sos";
 import { useOnlineStatus } from "@/lib/useOnlineStatus";
-
-const REBEACON_MS = 15_000;
+import { SOS_REBEACON_MS } from "@/lib/timings";
 
 /**
  * No-install SOS beacon — a bare link anyone (victim or bystander) can open
@@ -42,13 +41,13 @@ export default function SosPage() {
       const latest = useSosStore.getState();
       const pos = coordsRef.current;
       if (pos) void latest.send(pos.lat, pos.lon, nameRef.current);
-    }, REBEACON_MS);
+    }, SOS_REBEACON_MS);
   };
 
   const gpsReady = gpsStatus === "ready" || gpsStatus === "cached";
 
   return (
-    <div className="min-h-dvh w-screen bg-black flex flex-col items-center justify-center gap-6 p-6 font-mono text-center">
+    <div className="min-h-dvh w-screen bg-black flex flex-col items-center justify-center gap-6 font-mono text-center p-6 pt-[calc(1.5rem+env(safe-area-inset-top))] pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
       {!online && (
         <div className="fixed top-0 inset-x-0 flex items-center justify-center gap-2 bg-[#93000a]/30 border-b border-[#FF0040]/50 text-[#ff8fa3] text-[11px] sm:text-xs uppercase tracking-wide px-3 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 z-10">
           <WifiOff size={12} /> Tidak ada koneksi — lokasi akan terkirim otomatis saat sinyal kembali

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import Database from "@tauri-apps/plugin-sql";
 import { Database as DbIcon } from "lucide-preact";
 import { isTauri } from "@/lib/tauri";
+import { DB_NAME } from "@/lib/config";
 import { Card } from "./Card";
 import { btn } from "./styles";
 
@@ -24,7 +25,7 @@ export function SQLiteCard() {
   async function setup() {
     if (!isTauri) return;
     try {
-      const db = await Database.load("sqlite:offroute.db");
+      const db = await Database.load(DB_NAME);
       await db.execute(
         "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL)",
       );
@@ -48,7 +49,7 @@ export function SQLiteCard() {
       return;
     }
     try {
-      const db = await Database.load("sqlite:offroute.db");
+      const db = await Database.load(DB_NAME);
       await db.execute("INSERT INTO notes (text) VALUES (?)", [input.trim()]);
       setInput("");
       const rows = await db.select<NoteRow[]>(

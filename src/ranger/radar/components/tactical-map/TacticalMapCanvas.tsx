@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker } from "react-leaflet";
 import { motion, useAnimation, AnimatePresence } from "framer-motion";
 import { Check, X } from "lucide-preact";
 import { useDeviceLocation } from "@/store/location";
+import { TILE_URL } from "@/lib/config";
 import { useFlareStore } from "@/store/flare";
 import { useBmkgQuake } from "@/store/bmkg";
 import { useEvacuationRequestsStore } from "@/store/evacuationRequests";
@@ -110,7 +111,7 @@ export function TacticalMapCanvas() {
               style={{ height: "100%", width: "100%" }}
             >
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                url={TILE_URL}
                 subdomains="abcd"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
               />

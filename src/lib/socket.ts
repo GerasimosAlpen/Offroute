@@ -1,5 +1,6 @@
 import { io, type Socket } from "socket.io-client";
 import { getApiBaseUrl } from "./apiBase";
+import { SOCKET_RECONNECT_DELAY_MS, SOCKET_RECONNECT_MAX_MS } from "./timings";
 
 /**
  * Singleton Socket.IO client.
@@ -16,8 +17,8 @@ export const socket: Socket = io(getApiBaseUrl(), {
   // good even when the network comes back. (A capped attempt count here was
   // exactly that bug.)
   reconnection: true,
-  reconnectionDelay: 2000,
-  reconnectionDelayMax: 30_000,
+  reconnectionDelay: SOCKET_RECONNECT_DELAY_MS,
+  reconnectionDelayMax: SOCKET_RECONNECT_MAX_MS,
   transports: ["websocket"],
 });
 

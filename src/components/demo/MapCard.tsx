@@ -2,9 +2,10 @@ import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import { MapPin } from "lucide-preact";
 import "@/lib/leaflet-setup";
 import { Card } from "./Card";
+import { OSM_TILE_URL, DEMO_COORDS } from "@/lib/config";
 
 export function MapCard() {
-  const jakarta: [number, number] = [-6.1754, 106.8272];
+  const jakarta: [number, number] = DEMO_COORDS;
 
   return (
     <Card
@@ -24,7 +25,7 @@ export function MapCard() {
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            url={OSM_TILE_URL}
           />
           <Marker position={jakarta}>
             <Popup>Offroute HQ</Popup>

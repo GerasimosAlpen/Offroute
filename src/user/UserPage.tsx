@@ -15,13 +15,15 @@ import { FlareControl } from "./pages/FlareControl";
 export default function UserPage() {
   return (
     <BootSequence>
-      <div className="flex h-dvh w-screen overflow-x-hidden bg-[#131313]">
-        <Switch>
-          <Route path="/user/report" component={EmergencyReport} />
-          <Route path="/user/map" component={DisasterMap} />
-          <Route path="/user/flare" component={FlareControl} />
-          <Route component={Dashboard} />
-        </Switch>
+      <div className="h-dvh w-screen overflow-hidden flex flex-col bg-[#131313] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <div className="flex-1 overflow-y-auto pb-20">
+          <Switch>
+            <Route path="/user/report" component={EmergencyReport} />
+            <Route path="/user/map" component={DisasterMap} />
+            <Route path="/user/flare" component={FlareControl} />
+            <Route component={Dashboard} />
+          </Switch>
+        </div>
         <UserBottomNav />
       </div>
     </BootSequence>

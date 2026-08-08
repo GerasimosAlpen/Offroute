@@ -5,7 +5,7 @@ import { usePresenceStore } from "@/store/presence";
 import { raiseAlert } from "@/lib/alerts";
 import { formatRelativeAge } from "@/lib/format";
 
-const SILENT_THRESHOLD_MS = 90_000; // several missed heartbeats — worth flagging, not just stale
+import { PERSONNEL_SILENT_THRESHOLD_MS } from "@/lib/timings";
 
 type UnitStatus = "online" | "silent" | "offline";
 
@@ -13,7 +13,7 @@ function statusOf(lastSeen: number | undefined, now: number): UnitStatus {
   if (lastSeen === undefined) return "offline";
   // Anything under the silent threshold counts as online — a heartbeat or
   // two of lag isn't worth alarming over.
-  return now - lastSeen <= SILENT_THRESHOLD_MS ? "online" : "silent";
+  return now - lastSeen <= PERSONNEL_SILENT_THRESHOLD_MS ? "online" : "silent";
 }
 
 const STATUS_STYLE: Record<UnitStatus, { dot: string; label: string; text: string }> = {
@@ -52,7 +52,7 @@ export function PersonnelStatusPanel() {
       if (status === "silent" && prev !== "silent") {
         raiseAlert(
           "Unit gagal lapor",
-          `${ranger.name} (${ranger.callsign}) belum lapor lebih dari ${Math.round(SILENT_THRESHOLD_MS / 60_000)} menit.`,
+          `${ranger.name} (${ranger.callsign}) belum lapor lebih dari ${Math.round(PERSONNEL_SILENT_THRESHOLD_MS / 60_000)} menit.`,
         );
       }
       lastStatusRef.current[ranger.id] = status;

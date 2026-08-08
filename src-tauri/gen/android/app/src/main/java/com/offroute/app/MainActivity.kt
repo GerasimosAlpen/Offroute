@@ -1,4 +1,4 @@
-package com.offroute.desktop
+package com.offroute.app
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

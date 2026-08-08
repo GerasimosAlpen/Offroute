@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { flareApi } from "@/lib/api";
 import { socket } from "@/lib/socket";
+import { FLARE_AUTO_EXPIRY_MS } from "@/lib/timings";
 
 interface FlareState {
   /** True once a FLARE is triggered, false again once stood down (manually, or by the 2-minute auto-expiry backstop) — no longer "never resets". */
@@ -15,9 +16,9 @@ interface FlareState {
 }
 
 // Auto-expiry backstop: if nobody presses "Stand Down," the FLARE deactivates
-// on its own after this long. Keyed to `sequence` so a stale timer from a
-// FLARE that's already been superseded (or manually stood down) can't fire.
-const AUTO_EXPIRY_MS = 2 * 60 * 1000;
+// on its own after FLARE_AUTO_EXPIRY_MS (lib/timings.ts). Keyed to `sequence`
+// so a stale timer from a FLARE that's already been superseded (or manually
+// stood down) can't fire.
 let autoExpiryTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
@@ -61,7 +62,7 @@ export const useFlareStore = create<FlareState>((set, get) => {
       if (autoExpiryTimer) clearTimeout(autoExpiryTimer);
       autoExpiryTimer = setTimeout(() => {
         if (get().active && get().sequence === watchedSequence) void get().deactivate();
-      }, AUTO_EXPIRY_MS);
+      }, FLARE_AUTO_EXPIRY_MS);
 
       try {
         const created = await flareApi.activate();

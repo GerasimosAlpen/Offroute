@@ -6,9 +6,7 @@ import {
   simulatedTravelDurationMs,
 } from "@/lib/routing";
 import { tasksApi } from "@/lib/api";
-
-/** How often (ms) transit positions are streamed to the backend — the glide fires per animation frame, the backend doesn't need frame-rate updates. */
-const POSITION_STREAM_INTERVAL_MS = 400;
+import { TASK_POSITION_STREAM_MS } from "@/lib/timings";
 
 interface TransitOptions {
   start: [number, number];
@@ -67,7 +65,7 @@ export async function driveTransitAnimation({
 
       const backendId = getBackendId();
       const now = performance.now();
-      if (backendId && now - lastPositionSentAt > POSITION_STREAM_INTERVAL_MS) {
+      if (backendId && now - lastPositionSentAt > TASK_POSITION_STREAM_MS) {
         lastPositionSentAt = now;
         tasksApi
           .updatePosition(backendId, pos[0], pos[1])

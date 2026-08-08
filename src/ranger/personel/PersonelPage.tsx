@@ -23,8 +23,8 @@ export default function PersonelPage() {
           means responsive to any screen size, not styled to look like a
           phone mockup. Full-bleed at every viewport width. */}
       <FlareAlertBanner />
-      <div className="h-dvh w-screen overflow-hidden flex flex-col">
-        <div className="flex-1 overflow-y-auto pb-[calc(5rem+env(safe-area-inset-bottom))]">
+      <div className="h-dvh w-screen overflow-hidden flex flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <div className="flex-1 overflow-y-auto pb-20">
           <Switch>
             <Route path="/ranger/personel/bahaya" component={DangerLevel} />
             <Route path="/ranger/personel/log" component={LogLaporan} />

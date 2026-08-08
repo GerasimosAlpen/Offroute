@@ -1,17 +1,47 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { isTauri } from "@/lib/tauri";
+import {
+  checkPermissions,
+  connect as blecConnect,
+  disconnect as blecDisconnect,
+  sendString,
+  startScan as blecStartScan,
+  stopScan as blecStopScan,
+  subscribeString,
+  type BleDevice as PluginDevice,
+} from "@mnlphlp/plugin-blec";
 
 /**
- * Desktop BLE relay (Tier 1 — see TODO.md's "Bluetooth — two tiers, build
- * tier 1 first"). Backed by `src-tauri/src/commands/bluetooth.rs`'s
- * `btleplug`-based commands, speaking Nordic UART Service (NUS) so this can
- * be verified against any existing NUS-compatible peripheral. This is BLE
- * central/client only — it can't yet make two Offroute instances talk
- * directly to each other, since that needs a peripheral/GATT-server role
- * too (Phase 2, not built here). No-ops entirely outside Tauri.
+ * Cross-platform BLE relay (Tier 1 — see TODO.md's "Bluetooth — two tiers,
+ * build tier 1 first"). Backed by the `tauri-plugin-blec` plugin: btleplug on
+ * desktop + iOS (CoreBluetooth), native Kotlin/JNI on Android — so the same
+ * store works on every OS. Speaks Nordic UART Service (NUS), the de facto
+ * BLE serial/text-relay protocol, so this can be verified against any
+ * existing NUS-compatible peripheral (e.g. a phone running nRF Connect in
+ * peripheral mode). BLE central/client only — two copies of Offroute can't
+ * talk directly to each other yet (needs a peripheral role, Phase 2).
+ * No-ops entirely outside Tauri.
  */
+
+// Nordic UART Service (NUS) characteristic UUIDs.
+const NUS_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // write to peripheral
+const NUS_TX_CHAR_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // notifications from peripheral
+
+/** blec connects to one peripheral at a time — track which address that is. */
+let connectedAddress: string | null = null;
+/** Keeps re-issuing scans until `stopScan` flips this off (blec scans are time-boxed). */
+let scanLoopActive = false;
+let cachedDevices: BleDevice[] = [];
+
+function toLocalDevice(d: PluginDevice): BleDevice {
+  return {
+    id: d.address,
+    name: d.name || null,
+    rssi: d.rssi ?? null,
+    connected: d.isConnected,
+  };
+}
 
 export interface BleDevice {
   id: string;
@@ -47,23 +77,19 @@ function withoutKey(record: Record<string, string>, key: string): Record<string,
   return rest;
 }
 
-// Polls ble_list_devices while scanning — btleplug discovers peripherals
-// asynchronously in the background, there's no push event for "new device
-// seen" from the Rust side, so the frontend just re-asks periodically.
-const SCAN_POLL_MS = 1500;
-let scanPollTimer: ReturnType<typeof setInterval> | null = null;
-
-if (isTauri) {
-  // Registered once at module scope, same discipline as the socket.io
-  // subscriptions elsewhere — incoming BLE notifications from a connected
-  // peripheral arrive here regardless of which component is mounted.
-  listen<{ deviceId: string; text: string }>("ble://message-received", (event) => {
-    const payload = event.payload;
-    if (!payload || typeof payload.text !== "string") return; // malformed, ignore rather than throw
-    useBluetoothStore.setState((s) => ({
-      messages: [...s.messages, { deviceId: payload.deviceId, text: payload.text, ts: Date.now() }],
-    }));
-  }).catch((err) => console.warn("[bluetooth] Failed to listen for ble://message-received:", err));
+async function runScanLoop() {
+  while (scanLoopActive) {
+    try {
+      await blecStartScan((pluginDevices) => {
+        if (!scanLoopActive) return;
+        cachedDevices = pluginDevices.map(toLocalDevice);
+        useBluetoothStore.setState({ devices: cachedDevices, lastError: null });
+      }, 15_000);
+    } catch (err) {
+      console.warn("[bluetooth] Scan cycle failed:", err);
+      useBluetoothStore.setState({ lastError: String(err) });
+    }
+  }
 }
 
 export const useBluetoothStore = create<BluetoothState>((set, get) => ({
@@ -74,24 +100,21 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
   deviceErrors: {},
 
   refreshDevices: async () => {
+    // blec has no post-scan list command — the scan handler is the source of
+    // truth, so this just re-applies the latest cached snapshot (kept for
+    // callers that used to rely on the old ble_list_devices poll).
     if (!isTauri) return;
-    try {
-      const devices = await invoke<BleDevice[]>("ble_list_devices");
-      set({ devices, lastError: null });
-    } catch (err) {
-      console.warn("[bluetooth] Failed to list devices:", err);
-      set({ lastError: String(err) });
-    }
+    set({ devices: cachedDevices, lastError: null });
   },
 
   startScan: async () => {
     if (!isTauri || get().scanning) return;
     try {
-      await invoke("ble_start_scan");
-      set({ scanning: true, lastError: null });
-      if (scanPollTimer) clearInterval(scanPollTimer);
-      scanPollTimer = setInterval(() => void get().refreshDevices(), SCAN_POLL_MS);
-      void get().refreshDevices();
+      const ok = await checkPermissions(true);
+      if (!ok) throw new Error("Bluetooth/lokasi izin ditolak — aktifkan di pengaturan sistem");
+      set({ scanning: true, lastError: null, devices: [], deviceErrors: {} });
+      scanLoopActive = true;
+      void runScanLoop();
     } catch (err) {
       console.warn("[bluetooth] Failed to start scan:", err);
       set({ lastError: String(err) });
@@ -100,12 +123,9 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
 
   stopScan: async () => {
     if (!isTauri) return;
-    if (scanPollTimer) {
-      clearInterval(scanPollTimer);
-      scanPollTimer = null;
-    }
+    scanLoopActive = false;
     try {
-      await invoke("ble_stop_scan");
+      await blecStopScan();
     } catch (err) {
       console.warn("[bluetooth] Failed to stop scan:", err);
     } finally {
@@ -117,7 +137,40 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
     if (!isTauri) return;
     set((s) => ({ deviceErrors: withoutKey(s.deviceErrors, deviceId) }));
     try {
-      await invoke("ble_connect", { deviceId });
+      // Ensure the address is in the scanned list (Android requires a scan
+      // result before connect).
+      const known = cachedDevices.some((d) => d.id === deviceId);
+      if (!known) throw new Error("perangkat tidak dikenal — pindai dulu");
+
+      await blecConnect(deviceId, () => {
+        connectedAddress = null;
+        useBluetoothStore.setState((s) => ({
+          devices: s.devices.map((d) => (d.id === deviceId ? { ...d, connected: false } : d)),
+        }));
+      });
+
+      connectedAddress = deviceId;
+      cachedDevices = cachedDevices.map((d) => ({
+        ...d,
+        connected: d.id === deviceId,
+      }));
+      set({ devices: cachedDevices });
+
+      // Inbound NUS notifications → store messages (same shape as the old
+      // `ble://message-received` event the Rust side used to emit).
+      try {
+        await subscribeString(NUS_TX_CHAR_UUID, NUS_SERVICE_UUID, (text) => {
+          set((s) => ({
+            messages: [
+              ...s.messages,
+              { deviceId, text, ts: Date.now() },
+            ],
+          }));
+        });
+      } catch (err) {
+        console.warn(`[bluetooth] subscribe failed on ${deviceId}:`, err);
+      }
+
       void get().refreshDevices();
     } catch (err) {
       console.warn(`[bluetooth] Failed to connect to ${deviceId}:`, err);
@@ -128,8 +181,10 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
   disconnect: async (deviceId) => {
     if (!isTauri) return;
     try {
-      await invoke("ble_disconnect", { deviceId });
-      void get().refreshDevices();
+      await blecDisconnect();
+      connectedAddress = null;
+      cachedDevices = cachedDevices.map((d) => (d.id === deviceId ? { ...d, connected: false } : d));
+      set({ devices: cachedDevices });
     } catch (err) {
       console.warn(`[bluetooth] Failed to disconnect ${deviceId}:`, err);
     }
@@ -137,9 +192,13 @@ export const useBluetoothStore = create<BluetoothState>((set, get) => ({
 
   sendMessage: async (deviceId, text) => {
     if (!isTauri) return;
+    if (connectedAddress !== deviceId) {
+      set((s) => ({ deviceErrors: { ...s.deviceErrors, [deviceId]: "hubungkan perangkat dulu" } }));
+      return;
+    }
     set((s) => ({ deviceErrors: withoutKey(s.deviceErrors, deviceId) }));
     try {
-      await invoke("ble_send_message", { deviceId, text });
+      await sendString(NUS_RX_CHAR_UUID, text, "withoutResponse", NUS_SERVICE_UUID);
     } catch (err) {
       console.warn(`[bluetooth] Failed to send message to ${deviceId}:`, err);
       set((s) => ({ deviceErrors: { ...s.deviceErrors, [deviceId]: String(err) } }));

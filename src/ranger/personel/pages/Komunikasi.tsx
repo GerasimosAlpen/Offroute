@@ -8,11 +8,10 @@ import { useDutyStatusStore } from "@/store/dutyStatus";
 import { useMessagePinsStore } from "@/store/messagePins";
 import { ChatBubble } from "@/ranger/comms/ChatBubble";
 import { BluetoothStatusBar } from "@/ranger/comms/BluetoothStatusBar";
+import { EMERGENCY_TEL } from "@/lib/config";
 
 const SELF_COLOR = "#ffb2bd";
 const ALL_CONTACTS = "SEMUA";
-/** Indonesia's unified national emergency number — a real tel: target, not a placeholder. */
-const EMERGENCY_TEL = "112";
 
 /**
  * Same live comms channel radar's Comm Center reads/writes — a personel unit

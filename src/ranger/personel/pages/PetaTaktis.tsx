@@ -8,6 +8,7 @@ import { useDeviceHeading, startHeadingWatch } from "@/store/heading";
 import { routeLengthMeters } from "@/lib/routing";
 import "@/lib/leaflet-setup";
 
+import { TILE_URL, DEFAULT_COORDS } from "@/lib/config";
 import { SELF_ICON, START_ICON } from "../components/peta-taktis/mapIcons";
 import { EventMapMarker } from "../components/peta-taktis/EventMapMarker";
 import { MapControls } from "../components/peta-taktis/MapControls";
@@ -57,7 +58,7 @@ export function PetaTaktis() {
   // Live position — reflects every GPS fix, moves as the crew actually moves.
   const userPos: [number, number] = coords
     ? [coords.lat, coords.lon]
-    : [-6.1818, 106.8223];
+    : DEFAULT_COORDS;
 
   // Starting point — captured once, from the first real fix, and never
   // moves again. Hazard positions below are anchored to this (not the live
@@ -204,7 +205,7 @@ export function PetaTaktis() {
               style={{ height: "100%", width: "100%", zIndex: 1 }}
             >
               <TileLayer
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                url={TILE_URL}
                 subdomains="abcd"
               />
 

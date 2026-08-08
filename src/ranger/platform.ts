@@ -29,3 +29,8 @@ export function useIsDesktop(): boolean {
 
   return isDesktop;
 }
+
+/** Inverse of useIsDesktop — mobile OS or narrow viewport. */
+export function useIsMobile(): boolean {
+  return !useIsDesktop();
+}

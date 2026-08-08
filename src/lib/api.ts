@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getApiBaseUrl } from "./apiBase";
+import { API_TIMEOUT_MS, HEALTH_TIMEOUT_MS } from "./timings";
 
 /**
  * Axios client pointed at the NestJS backend.
@@ -7,7 +8,7 @@ import { getApiBaseUrl } from "./apiBase";
  */
 export const api = axios.create({
   baseURL: getApiBaseUrl(),
-  timeout: 10_000,
+  timeout: API_TIMEOUT_MS,
   headers: { "Content-Type": "application/json" },
 });
 
@@ -24,7 +25,7 @@ export const healthApi = {
   ping: async (): Promise<HealthResult> => {
     const started = performance.now();
     try {
-      const r = await api.get<{ ok: boolean; db: boolean }>("/health", { timeout: 5000 });
+      const r = await api.get<{ ok: boolean; db: boolean }>("/health", { timeout: HEALTH_TIMEOUT_MS });
       return { ok: Boolean(r.data?.ok), db: Boolean(r.data?.db), latencyMs: Math.round(performance.now() - started) };
     } catch {
       return { ok: false, db: false, latencyMs: Math.round(performance.now() - started) };

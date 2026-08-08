@@ -1,5 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
 import { isTauri } from "./tauri";
+import { DB_NAME } from "./config";
 
 /**
  * Real offline cache, backed by SQLite (same `offroute.db` file the demo
@@ -19,7 +20,7 @@ import { isTauri } from "./tauri";
  * in-memory hardcoded fallbacks each store already has still apply there.
  */
 
-const DB_PATH = "sqlite:offroute.db";
+const DB_PATH = DB_NAME;
 let dbPromise: Promise<Database> | null = null;
 
 async function getDb(): Promise<Database> {

@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { ArrowLeft, ArrowRight, RotateCw, Home, Globe, Search, Film } from "lucide-preact";
 import { getApiBaseUrl } from "@/lib/apiBase";
 import { isTauri } from "@/lib/tauri";
+import { WEB_SEARCH_URL } from "@/lib/config";
 import { useWindowLayout } from "../window-manager/useWindowLayout";
+import { useIsMobile } from "../../../platform";
 
 const isUrlLike = (q: string) => /^https?:\/\//i.test(q) || /^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(q);
 const normalizeUrl = (q: string) => (/^https?:\/\//i.test(q) ? q : `https://${q}`);
-const googleSearch = (q: string) => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+const googleSearch = (q: string) => `${WEB_SEARCH_URL}${encodeURIComponent(q)}`;
 const proxied = (url: string) => `${getApiBaseUrl()}/proxy?url=${encodeURIComponent(url)}`;
 
 async function invoke(cmd: string, args?: Record<string, unknown>) {
@@ -34,8 +36,9 @@ const BOOKMARKS: { label: string; url: string; icon?: typeof Globe }[] = [
  * window). On desktop it drives a native child webview (full engine, so
  * Google/YouTube work) that the frontend keeps positioned over this panel's
  * content area; it's parked off-screen whenever the panel isn't the top
- * window or is minimized. In a plain web build it falls back to the proxy
- * iframe (lightweight sites) — the native embed only exists under Tauri.
+ * window or is minimized. In a plain web build — and on mobile, where Tauri
+ * allows only one webview per window and the desktop browser commands don't
+ * exist — it falls back to the proxy iframe (lightweight sites).
  */
 export function WebBrowserPanel() {
   const [addr, setAddr] = useState("");
@@ -44,6 +47,8 @@ export function WebBrowserPanel() {
   const [reloadKey, setReloadKey] = useState(0);
   const holderRef = useRef<HTMLDivElement>(null);
   const isTop = useWindowLayout((s) => s.isTop("browser"));
+  const isMobile = useIsMobile();
+  const nativeEmbed = isTauri && !isMobile;
 
   const current = idx >= 0 ? history[idx] : null;
 
@@ -66,18 +71,18 @@ export function WebBrowserPanel() {
   const reload = () => setReloadKey((k) => k + 1);
   const home = () => { setIdx(-1); setAddr(""); };
 
-  // ── Native embed (Tauri): drive the child webview to this panel ──────────
+  // ── Native embed (Tauri desktop): drive the child webview to this panel ──
   // Navigate whenever the current page changes.
   useEffect(() => {
-    if (!isTauri || !current) return;
+    if (!nativeEmbed || !current) return;
     void invoke("browser_navigate", { url: current }).catch(() => {});
     // reloadKey re-navigates the same URL.
-  }, [current, reloadKey]);
+  }, [current, reloadKey, nativeEmbed]);
 
   // Keep the webview overlaid on the content area; park it off-screen when the
   // panel isn't the top window, is empty, or the tab is hidden.
   useEffect(() => {
-    if (!isTauri) return;
+    if (!nativeEmbed) return;
     if (!current || !isTop) {
       void invoke("browser_hide").catch(() => {});
       return;
@@ -106,9 +111,9 @@ export function WebBrowserPanel() {
 
   // Destroy the embedded webview when leaving the page / unmounting.
   useEffect(() => {
-    if (!isTauri) return;
+    if (!nativeEmbed) return;
     return () => { void invoke("browser_close").catch(() => {}); };
-  }, []);
+  }, [nativeEmbed]);
 
   return (
     <div className="flex-1 min-h-0 bg-[#262626] border border-[#444] flex flex-col overflow-hidden">
@@ -146,7 +151,7 @@ export function WebBrowserPanel() {
 
       {/* Content */}
       {current ? (
-        isTauri ? (
+        nativeEmbed ? (
           // Transparent placeholder — the native webview is positioned over it.
           <div ref={holderRef} className="flex-1 min-h-0 bg-[#0d0d0d]" />
         ) : (
@@ -165,9 +170,9 @@ export function WebBrowserPanel() {
           <div>
             <p className="font-grotesk font-bold text-[#e5e2e1] text-lg">Radar Browser</p>
             <p className="font-mono text-[10px] text-[#666] mt-1 max-w-xs">
-              {isTauri
+              {nativeEmbed
                 ? "A full browser, inside the radar. Search Google or open any site."
-                : "Web build: lightweight sites render inline via proxy."}
+                : "Mobile / web: lightweight sites render inline via proxy."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2 justify-center max-w-sm">

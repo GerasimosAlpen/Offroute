@@ -1,4 +1,6 @@
 /** Flat-earth approximation — fine at the sub-kilometer scale these mock offsets live at. */
+import { OSRM_ENDPOINT } from "./config";
+
 export function metersBetween(a: [number, number], b: [number, number]) {
   const latM = (a[0] - b[0]) * 111_320;
   const lonM = (a[1] - b[1]) * 111_320 * Math.cos((a[0] * Math.PI) / 180);
@@ -28,9 +30,8 @@ function cumulativeDistances(route: [number, number][]) {
   return cumulative;
 }
 
-const OSRM_ENDPOINT = "https://router.project-osrm.org/route/v1/driving";
-
-// TODO(routing): router.project-osrm.org is OSRM's public DEMO server — free,
+// TODO(routing): OSRM_ENDPOINT (lib/config.ts) points at OSRM's public DEMO
+// server — free,
 // no key, real road-snapped routing, but rate-limited and explicitly "not
 // suitable for production" per OSRM's own usage policy. Fine for a demo;
 // self-host OSRM or move to a paid routing API (GraphHopper, Mapbox, etc.)
