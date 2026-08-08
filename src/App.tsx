@@ -58,6 +58,13 @@ function AppInit() {
 }
 
 export default function App() {
+  // Auto-redirect standard paths to hash for web testing (e.g. /demo -> /#/demo)
+  if (typeof window !== "undefined" && window.location.pathname !== "/" && window.location.pathname !== "/index.html") {
+    const path = window.location.pathname;
+    window.history.replaceState(null, "", "/");
+    window.location.hash = path;
+  }
+
   return (
     <Router hook={useHashLocation}>
       <AppInit />
@@ -67,7 +74,8 @@ export default function App() {
           <Route path="/ranger/personel/:tab?" component={PersonelPage} />
           <Route path="/user/:tab?" component={UserPage} />
           <Route path="/sos" component={SosPage} />
-          <Route path="/" component={DemoPlayground} />
+          <Route path="/demo" component={DemoPlayground} />
+          <Route path="/" component={UserPage} />
         </Switch>
       </Suspense>
     </Router>
