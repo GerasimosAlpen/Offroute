@@ -33,7 +33,7 @@ export function FlareAlertBanner() {
           initial={{ y: -60, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: -60, opacity: 0 }}
-          className="fixed top-0 inset-x-0 z-[2000] bg-[#93000a] border-b-2 border-[#ff0040] px-4 py-2.5 flex items-center gap-3"
+          className="fixed top-0 inset-x-0 z-[2000] bg-[#93000a] border-b-2 border-[#ff0040] px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2.5 flex items-center gap-3"
         >
           <Siren size={18} className="text-white shrink-0 animate-pulse" />
           <div className="flex-1 min-w-0">

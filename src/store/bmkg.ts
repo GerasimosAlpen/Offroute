@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { BMKG_ENDPOINT } from "@/lib/config";
+import { BMKG_POLL_MS } from "@/lib/timings";
 
 export interface QuakeInfo {
   magnitude: number;
@@ -15,9 +17,6 @@ interface BmkgState {
   status: "loading" | "ready" | "unavailable";
   quake: QuakeInfo | null;
 }
-
-const ENDPOINT = "https://data.bmkg.go.id/DataMKG/TEWS/autogempa.json";
-const POLL_MS = 120_000;
 
 /**
  * BMKG (Indonesia's meteorology/geophysics agency) publishes the latest
@@ -37,7 +36,7 @@ let started = false;
 
 async function fetchLatestQuake() {
   try {
-    const res = await fetch(ENDPOINT);
+    const res = await fetch(BMKG_ENDPOINT);
     if (!res.ok) throw new Error(String(res.status));
     const data = await res.json();
     const g = data?.Infogempa?.gempa;
@@ -73,7 +72,7 @@ function startPolling() {
   if (started) return;
   started = true;
   void fetchLatestQuake();
-  setInterval(fetchLatestQuake, POLL_MS);
+  setInterval(fetchLatestQuake, BMKG_POLL_MS);
 }
 
 export function useBmkgQuake(): BmkgState {

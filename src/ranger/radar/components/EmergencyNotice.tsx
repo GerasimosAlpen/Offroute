@@ -24,7 +24,7 @@ export function EmergencyNotice() {
           initial={{ opacity: 0, y: -16 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -16 }}
-          className="fixed top-4 right-4 z-[2000] bg-[#131313] border border-[#ff0040] px-4 py-3 flex items-center gap-3 shadow-[0_0_20px_rgba(255,0,64,0.3)] max-w-sm"
+          className="fixed top-[calc(1rem+env(safe-area-inset-top))] right-4 z-[2000] bg-[#131313] border border-[#ff0040] px-4 py-3 flex items-center gap-3 shadow-[0_0_20px_rgba(255,0,64,0.3)] max-w-sm"
         >
           <TriangleAlert size={18} className="text-[#ff0040] shrink-0" />
           <div className="flex flex-col gap-0.5 min-w-0">

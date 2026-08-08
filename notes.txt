@@ -1,0 +1,14 @@
+
+Plan to run on iOS (simulator)
+1. Install Node — brew install node
+2. Install Rust — curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+3. Activate Xcode — sudo xcode-select -s /Applications/Xcode.app (verify with xcodebuild -version)
+4. Add iOS Rust targets — rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+5. Install deps — npm install
+6. Init iOS project — npx tauri ios init → creates src-tauri/gen/ios/Offroute.xcodeproj
+7. Run in simulator — npx tauri ios dev (builds Rust core + launches the app in iOS Simulator)
+8. Or via Xcode GUI — open src-tauri/gen/ios/Offroute.xcodeproj, pick a simulator scheme, hit Run (same thing, just in Xcode)
+Things that will bite you
+- starship-battery in Cargo.toml:43 is excluded only for Android (cfg(not(target_os = "android"))) — it will try to compile on iOS and likely fail. Needs the cfg widened to iOS, or removal.
+- Physical iPhone device: the dev server binds to localhost:1420, which only works in the simulator. For a real device you must set an Apple ID signing team in Xcode and either build a standalone .ipa (npx tauri ios build --device) or point devUrl at your Mac's LAN IP (add server.host: true to vite.config.ts).
+Want me to proceed with any of this (e.g., install the toolchains, widen the starship-battery cfg, or run tauri ios init), or are you just after the steps?

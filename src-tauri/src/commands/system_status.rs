@@ -9,7 +9,7 @@ pub struct BatteryStatus {
     pub available: bool,
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub fn get_battery_status() -> Result<BatteryStatus, String> {
     let manager = starship_battery::Manager::new().map_err(|e| e.to_string())?;
@@ -17,21 +17,37 @@ pub fn get_battery_status() -> Result<BatteryStatus, String> {
 
     match batteries.next() {
         Some(Ok(battery)) => {
-            let percent = (battery.state_of_charge().value * 100.0).round().clamp(0.0, 100.0) as u8;
+            let percent = (battery.state_of_charge().value * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8;
             let charging = matches!(
                 battery.state(),
                 starship_battery::State::Charging | starship_battery::State::Full
             );
-            Ok(BatteryStatus { percent, charging, available: true })
+            Ok(BatteryStatus {
+                percent,
+                charging,
+                available: true,
+            })
         }
-        _ => Ok(BatteryStatus { percent: 0, charging: false, available: false }),
+        _ => Ok(BatteryStatus {
+            percent: 0,
+            charging: false,
+            available: false,
+        }),
     }
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[tauri::command]
 pub fn get_battery_status() -> Result<BatteryStatus, String> {
-    Ok(BatteryStatus { percent: 100, charging: true, available: false })
+    // No battery crate for mobile targets — the webview's navigator battery
+    // API is deprecated, so surface an "unknown" status rather than fake data.
+    Ok(BatteryStatus {
+        percent: 0,
+        charging: false,
+        available: false,
+    })
 }
 
 #[derive(Clone, Serialize)]
@@ -66,7 +82,8 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
         serde_json::from_slice(&output.stdout).map_err(|e| e.to_string())?;
 
     let iface = &json["SPAirPortDataType"][0]["spairport_airport_interfaces"][0];
-    let connected = iface["spairport_status_information"].as_str() == Some("spairport_status_connected");
+    let connected =
+        iface["spairport_status_information"].as_str() == Some("spairport_status_connected");
 
     let current = &iface["spairport_current_network_information"];
     let ssid = current["_name"].as_str().map(String::from);
@@ -78,7 +95,12 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
 
     let quality_percent = rssi_dbm.map(|rssi| (2 * (rssi + 100)).clamp(0, 100) as u8);
 
-    Ok(NetworkStatus { connected, ssid, rssi_dbm, quality_percent })
+    Ok(NetworkStatus {
+        connected,
+        ssid,
+        rssi_dbm,
+        quality_percent,
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -102,7 +124,9 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
     let mut quality_percent = None;
 
     for line in text.lines() {
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let key = key.trim();
         let value = value.trim();
 
@@ -122,7 +146,12 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
     }
 
     // netsh reports quality directly, not raw RSSI — no dBm figure to surface here.
-    Ok(NetworkStatus { connected, ssid, rssi_dbm: None, quality_percent })
+    Ok(NetworkStatus {
+        connected,
+        ssid,
+        rssi_dbm: None,
+        quality_percent,
+    })
 }
 
 #[cfg(target_os = "linux")]
@@ -133,8 +162,7 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
     //   face   status   link   level   noise   ...
     //   wlan0: 0000     70.    -40.    -256    ...
     // `link` is a driver-defined quality figure, conventionally out of 70.
-    let contents = std::fs::read_to_string("/proc/net/wireless")
-        .map_err(|e| e.to_string())?;
+    let contents = std::fs::read_to_string("/proc/net/wireless").map_err(|e| e.to_string())?;
 
     let data_line = contents
         .lines()
@@ -147,8 +175,14 @@ pub fn get_network_status() -> Result<NetworkStatus, String> {
         return Err("unexpected /proc/net/wireless format".into());
     }
 
-    let link_quality: f32 = fields[2].trim_end_matches('.').parse().map_err(|_| "bad link quality")?;
-    let level_dbm: f32 = fields[3].trim_end_matches('.').parse().map_err(|_| "bad signal level")?;
+    let link_quality: f32 = fields[2]
+        .trim_end_matches('.')
+        .parse()
+        .map_err(|_| "bad link quality")?;
+    let level_dbm: f32 = fields[3]
+        .trim_end_matches('.')
+        .parse()
+        .map_err(|_| "bad signal level")?;
 
     let quality_percent = ((link_quality / 70.0) * 100.0).round().clamp(0.0, 100.0) as u8;
 

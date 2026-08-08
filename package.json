@@ -13,6 +13,7 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/space-grotesk": "^5.2.10",
+    "@mnlphlp/plugin-blec": "^0.12.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/preact-query": "^5.100.14",
     "@tauri-apps/api": "^2",

@@ -5,6 +5,7 @@ import { socket } from "@/lib/socket";
 import { queryClient } from "@/lib/queryClient";
 import { cacheGetAll, cacheSet, enqueueMutation, registerReplayHandler } from "@/lib/offlineCache";
 import { raiseAlert } from "@/lib/alerts";
+import { INCIDENTS_REFRESH_MS } from "@/lib/timings";
 
 // Replays incident reports that were filed while offline — a report written
 // in a dead zone still reaches radar the moment connectivity returns.
@@ -81,7 +82,7 @@ export function useIncidents() {
       }
     },
     placeholderData: HAZARDS,
-    staleTime: 1000 * 30, // 30s — incidents can be created any time
-    refetchInterval: 1000 * 30, // auto-refresh every 30s
+    staleTime: INCIDENTS_REFRESH_MS, // incidents can be created any time
+    refetchInterval: INCIDENTS_REFRESH_MS, // auto-refresh
   });
 }

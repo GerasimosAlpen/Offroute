@@ -31,8 +31,7 @@ import { useBluetoothStore } from "@/store/bluetooth";
 import { useDeviceLocation } from "@/store/location";
 import { useBmkgQuake } from "@/store/bmkg";
 import { usePresenceStore } from "@/store/presence";
-
-const HEALTH_POLL_MS = 5000;
+import { HEALTH_POLL_MS } from "@/lib/timings";
 
 type Tone = "good" | "warn" | "bad" | "idle";
 const TONE: Record<Tone, string> = {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { isTauri } from "@/lib/tauri";
+import { BATTERY_POLL_MS, NETWORK_POLL_MS } from "@/lib/timings";
 
 export interface BatteryStatus {
   percent: number;
@@ -19,9 +20,6 @@ interface SystemStatusState {
   battery: BatteryStatus | null;
   network: NetworkStatus | null;
 }
-
-const BATTERY_POLL_MS = 30_000;
-const NETWORK_POLL_MS = 15_000;
 
 /**
  * Real device battery + WiFi signal, read via Tauri Rust commands

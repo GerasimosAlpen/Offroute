@@ -49,6 +49,7 @@ fn normalize(bin: &str, mut args: Vec<String>) -> Vec<String> {
 /// stdout+stderr, or a friendly `Err` string (never panics). The frontend
 /// handles built-in commands (help/clear/health/…) itself and only reaches
 /// here for real system binaries.
+#[cfg(not(mobile))]
 #[tauri::command]
 pub async fn run_system_command(input: String) -> Result<String, String> {
     let trimmed = input.trim();
@@ -93,4 +94,12 @@ pub async fn run_system_command(input: String) -> Result<String, String> {
         combined = format!("(tidak ada output, exit {})", output.status.code().unwrap_or(-1));
     }
     Ok(combined)
+}
+
+/// Mobile (iOS/Android) sandboxes forbid spawning processes — every command
+/// fails cleanly with a hint instead of panicking at runtime.
+#[cfg(mobile)]
+#[tauri::command]
+pub async fn run_system_command(_input: String) -> Result<String, String> {
+    Err("perintah sistem tidak tersedia di perangkat seluler".into())
 }

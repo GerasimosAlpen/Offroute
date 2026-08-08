@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { getPersisted, setPersisted } from "@/lib/persist";
 import { formatCoords } from "@/lib/format";
+import { NOMINATIM_ENDPOINT, IP_GEO_PROVIDERS } from "@/lib/config";
+import { IP_FALLBACK_DELAY_MS } from "@/lib/timings";
 import { watchPosition as tauriWatchPosition, checkPermissions, requestPermissions } from "@tauri-apps/plugin-geolocation";
 
 export type GeoStatus =
@@ -22,6 +24,12 @@ interface LocationState {
   label: string;
   /** Raw coordinates, once a fix has actually landed — for anything that needs to plot a point (the tactical map), not just display text. */
   coords: Coords | null;
+  /**
+   * How the fix was obtained. `"gps"` is a precise device fix; `"ip"` is
+   * city-level approximation (clearly labeled, never persisted as GPS);
+   * `"manual"` is an operator-set override.
+   */
+  source: "gps" | "ip" | "manual" | null;
 }
 
 interface CachedLocation {
@@ -37,7 +45,7 @@ async function reverseGeocode(
   lon: number,
   signal: AbortSignal,
 ): Promise<string | null> {
-  const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`;
+  const url = `${NOMINATIM_ENDPOINT}?format=jsonv2&zoom=10&lat=${lat.toFixed(3)}&lon=${lon.toFixed(3)}`;
   const res = await fetch(url, {
     signal,
     headers: { Accept: "application/json" },
@@ -67,6 +75,7 @@ export const useLocationStore = create<LocationState>(() => ({
   status: "locating",
   label: "Acquiring GPS lock...",
   coords: null,
+  source: null,
 }));
 
 let started = false;
@@ -86,11 +95,9 @@ let ipTried = false;
  * position, which is exactly right for a stationary command console. Precise
  * GPS still takes over automatically if it ever succeeds.
  */
-// Free, keyless, CORS-open IP geolocation providers, tried in order — a
-// second one covers the first being rate-limited/down (ipapi.co paywalls
+// Free, keyless, CORS-open IP geolocation providers (see lib/config.ts) —
+// a second one covers the first being rate-limited/down (ipapi.co paywalls
 // quickly, so ipwho.is leads).
-const IP_GEO_PROVIDERS = ["https://ipwho.is/", "https://ipapi.co/json/"];
-
 async function ipGeolocate(): Promise<{ lat: number; lon: number } | null> {
   for (const url of IP_GEO_PROVIDERS) {
     try {
@@ -118,13 +125,19 @@ async function tryIpFallback() {
   const ip = await ipGeolocate();
   if (hasLiveFix) return; // a precise fix landed while we were fetching
   if (ip) {
-    handleFix(ip.lat, ip.lon);
+    handleFix(ip.lat, ip.lon, "ip");
   } else if (!useLocationStore.getState().coords) {
     useLocationStore.setState({ status: "unavailable", label: "LOCATION UNKNOWN" });
   }
 }
 
-function handleFix(lat: number, lon: number) {
+/**
+ * Records a fix. `source` tracks how the fix was obtained: an IP-derived
+ * position is a city-level approximation and — unlike a real GPS fix — never
+ * persisted to the cached-location slot (a stale approximate coordinate used
+ * to masquerade as a precise saved position on the next launch).
+ */
+function handleFix(lat: number, lon: number, source: "gps" | "ip" = "gps") {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
   if (key === lastCoordsKey) return;
   lastCoordsKey = key;
@@ -133,6 +146,7 @@ function handleFix(lat: number, lon: number) {
     status: "resolving",
     label: formatCoords(lat, lon),
     coords: { lat, lon },
+    source,
   });
 
   geocodeAbort?.abort();
@@ -141,13 +155,13 @@ function handleFix(lat: number, lon: number) {
   reverseGeocode(lat, lon, geocodeAbort.signal)
     .then((place) => {
       const label = place ? place.toUpperCase() : formatCoords(lat, lon);
-      useLocationStore.setState({ status: "ready", label, coords: { lat, lon } });
-      void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
+      useLocationStore.setState({ status: "ready", label, coords: { lat, lon }, source });
+      if (source === "gps") void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
     })
     .catch(() => {
       const label = formatCoords(lat, lon);
-      useLocationStore.setState({ status: "ready", label, coords: { lat, lon } });
-      void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
+      useLocationStore.setState({ status: "ready", label, coords: { lat, lon }, source });
+      if (source === "gps") void setPersisted<CachedLocation>(STORAGE_KEY, { label, lat, lon });
     });
 }
 
@@ -164,6 +178,7 @@ async function loadCachedLabel() {
       status: "cached",
       label: cached.label,
       coords: { lat: cached.lat, lon: cached.lon },
+      source: "gps",
     });
   }
 }
@@ -193,7 +208,7 @@ async function startWatching() {
             }
           }
         );
-        setTimeout(() => void tryIpFallback(), 6000);
+        setTimeout(() => void tryIpFallback(), IP_FALLBACK_DELAY_MS);
         return;
       }
     } catch (err) {
@@ -226,7 +241,7 @@ async function startWatching() {
   // watchPosition can hang without ever firing either callback in some
   // webviews — so kick the IP fallback after a short wait
   // regardless, guarded so a real fix always wins.
-  setTimeout(() => void tryIpFallback(), 6000);
+  setTimeout(() => void tryIpFallback(), IP_FALLBACK_DELAY_MS);
 }
 
 /** Reads the shared location state, starting the GPS watch on first use. */
@@ -246,6 +261,6 @@ export function useDeviceLocation(): LocationState {
 export function setManualLocation(lat: number, lon: number, label?: string) {
   lastCoordsKey = `${lat.toFixed(3)},${lon.toFixed(3)}`;
   const resolvedLabel = label?.trim() || formatCoords(lat, lon);
-  useLocationStore.setState({ status: "ready", label: resolvedLabel, coords: { lat, lon } });
+  useLocationStore.setState({ status: "ready", label: resolvedLabel, coords: { lat, lon }, source: "manual" });
   void setPersisted<CachedLocation>(STORAGE_KEY, { label: resolvedLabel, lat, lon });
 }

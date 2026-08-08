@@ -13,13 +13,14 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function RadarSettings() {
-  const { status, label, coords } = useDeviceLocation();
+  const { status, label, coords, source } = useDeviceLocation();
   const [lat, setLat] = useState(coords ? String(coords.lat) : "");
   const [lon, setLon] = useState(coords ? String(coords.lon) : "");
   const [name, setName] = useState("");
   const [saved, setSaved] = useState(false);
 
   const gpsBroken = status === "denied" || status === "unavailable";
+  const approximate = source === "ip";
 
   const submit = () => {
     const latNum = Number(lat);
@@ -44,6 +45,11 @@ export function RadarSettings() {
         <p className="font-mono text-xs text-[#888]">
           Status GPS: <span className={gpsBroken ? "text-[#ff8fa3]" : "text-[#66df75]"}>{STATUS_LABEL[status] ?? status}</span>
           {" — "}{label}
+          {approximate && (
+            <span className="mt-1 block text-[#e5e2e1]">
+              Lokasi: {label}
+            </span>
+          )}
         </p>
 
         {gpsBroken && (

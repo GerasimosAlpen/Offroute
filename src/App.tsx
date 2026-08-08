@@ -61,7 +61,7 @@ export default function App() {
   return (
     <Router hook={useHashLocation}>
       <AppInit />
-      <Suspense fallback={<div class="flex items-center justify-center h-screen bg-neutral-900 text-white font-mono text-sm animate-pulse">BOOTING OFFRT_OS...</div>}>
+      <Suspense fallback={<div class="flex items-center justify-center h-dvh bg-neutral-900 text-white font-mono text-sm animate-pulse">BOOTING OFFRT_OS...</div>}>
         <Switch>
           <Route path="/ranger/radar/:tab?" component={RadarPage} />
           <Route path="/ranger/personel/:tab?" component={PersonelPage} />

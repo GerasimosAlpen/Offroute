@@ -37,18 +37,14 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_geolocation::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .manage(commands::bluetooth::BleState::default())
+        // Cross-platform BLE (btleplug on desktop/iOS, native Kotlin on Android) —
+        // replaces the old btleplug-only commands/bluetooth.rs.
+        .plugin(tauri_plugin_blec::init())
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::device::emit_test_event,
             commands::system_status::get_battery_status,
             commands::system_status::get_network_status,
-            commands::bluetooth::ble_start_scan,
-            commands::bluetooth::ble_stop_scan,
-            commands::bluetooth::ble_list_devices,
-            commands::bluetooth::ble_connect,
-            commands::bluetooth::ble_disconnect,
-            commands::bluetooth::ble_send_message,
             commands::terminal::run_system_command,
             commands::control::restart_app,
             commands::control::quit_app,
