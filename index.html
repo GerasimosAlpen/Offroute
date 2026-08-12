@@ -5,7 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Offroute</title>
     <style>
-      html, body { height: 100%; margin: 0; background: #0a0a0a; }
+      html, body, #root { height: 100%; margin: 0; padding: 0; background: #0a0a0a; overscroll-behavior-y: none; }
+      /* iOS WKWebView: guarantee body reaches the physical screen edge even if
+         `100dvh` is under-reported on certain device/iOS combos. */
+      @supports (height: 100dvh) {
+        html, body, #root { height: 100dvh; }
+      }
     </style>
   </head>
 
