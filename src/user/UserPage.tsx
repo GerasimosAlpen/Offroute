@@ -15,8 +15,8 @@ import { FlareControl } from "./pages/FlareControl";
 export default function UserPage() {
   return (
     <BootSequence>
-      <div className="h-dvh w-screen overflow-hidden flex flex-col bg-[#131313] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-        <div className="flex-1 overflow-y-auto pb-20">
+      <div className="h-dvh w-screen overflow-hidden flex flex-col bg-[#131313] pt-[env(safe-area-inset-top)]">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           <Switch>
             <Route path="/user/report" component={EmergencyReport} />
             <Route path="/user/map" component={DisasterMap} />

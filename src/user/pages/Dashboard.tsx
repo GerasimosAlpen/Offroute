@@ -37,7 +37,7 @@ export function Dashboard() {
   const filtered = RECENT_ACTIVITY.filter((a) => filter === "semua" || a.type === filter);
 
   return (
-    <div className="flex flex-col bg-[#131313]">
+    <div className="flex flex-col bg-[#131313] pb-4">
       <StatusHeader />
 
       <div className="p-4 grid grid-cols-2 gap-3">

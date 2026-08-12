@@ -24,10 +24,10 @@ const stack = [
 
 export default function DemoPlayground() {
   return (
-    <div class="min-h-screen bg-zinc-950 text-zinc-100">
+    <div class="min-h-dvh bg-zinc-950 text-zinc-100">
       {/* header */}
       <header class="border-b border-zinc-800/60 px-6 py-4">
-        <div class="max-w-5xl mx-auto flex items-center justify-between">
+        <div class="max-w-5xl mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center">
               <svg class="w-4 h-4 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={1.5}>
@@ -44,7 +44,7 @@ export default function DemoPlayground() {
               </p>
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <Link
               href="/ranger/radar"
               class="text-xs font-medium text-indigo-400 hover:text-indigo-300"
