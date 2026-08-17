@@ -1,5 +1,4 @@
 import { Bluetooth } from "lucide-preact";
-import { isTauri } from "@/lib/tauri";
 import { useBluetoothStore } from "@/store/bluetooth";
 import { Card } from "./Card";
 import { primaryBtn, ghostBtn } from "./styles";
