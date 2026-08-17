@@ -415,8 +415,8 @@ Eight workflows in `.github/workflows/`. All validated with `actionlint`.
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `ci.yml` | push/PR | Typecheck, lint, format, tests, frontend bundle, cargo fmt/clippy/check, `_server` build + test |
-| `build.yml` | push/PR/tag | Linux, Windows, macOS (ARM + Intel), Android, iOS simulator |
-| `release.yml` | tag `v*` | Reuses `build.yml`, publishes a GitHub Release with all installers |
+| `build.yml` | PR / called | Linux, Windows, macOS (ARM + Intel), Android |
+| `release.yml` | push to main, tag `v*` | Reuses `build.yml`, then publishes a release |
 | `pr-bot.yml` | PR / build done | Sticky PR comment with a per-job status table |
 | `security.yml` | push/PR/weekly | CodeQL, `cargo audit`, `npm audit`, gitleaks |
 | `labeler.yml` | PR | Area and size labels |
@@ -453,24 +453,45 @@ compiled `cargo-ndk` from source on every single run.
 - `ci.yml` uses path filters, so a docs-only PR skips the heavy jobs.
 - Branch protection should require the single **`CI OK`** job rather than each
   matrix leg by name.
-- macOS and iOS jobs are `continue-on-error: true`. They had never been built
-  in this repo before, so they must not block merges until observed green.
-  Remove the flag once they are.
+- All build jobs are blocking. macOS was non-blocking at first because it had
+  never been built here; both variants have since gone green, so the flag was
+  removed.
+- **There is no iOS job.** A device build needs a paid Apple Developer account
+  ($99/yr) and signing certificates in repo secrets, which the team does not
+  have. A simulator-only build was tried and dropped: it produced an artifact
+  nobody can install, and Tauri's generated Xcode project fights a plain
+  `xcodebuild` invocation. Add it back when there is an Apple account to sign
+  with.
 - Android APKs are signed with the **debug key** — testable, not distributable.
   Shipping to Play Store needs a real keystore in repo secrets.
-- iOS is simulator-only and unsigned. Device builds need a paid Apple Developer
-  account and certificates.
+- `build.yml` does **not** trigger on push to main; `release.yml` owns main and
+  calls it via `workflow_call`. Otherwise every merge would build twice.
 - `pr-bot.yml` and `labeler.yml` use `pull_request_target` / `workflow_run`
   because PRs come from forks, where a `pull_request` token is read-only and
   cannot comment. Neither job checks out or executes PR code, which is what
   keeps that safe.
 
-### Cutting a release
+### Releases
+
+Two kinds, both automatic:
+
+**Rolling `latest`** — every merge to `main` rebuilds all platforms and replaces
+the `latest` pre-release in place. Always-current installers without digging
+through the Actions tab.
+
+**Versioned** — push a tag:
 
 ```bash
 git tag v0.2.0
 git push origin v0.2.0
 ```
+
+That produces a permanent, non-prerelease GitHub Release with a changelog
+generated from the commits since the previous tag. `workflow_dispatch` with a
+tag input does the same thing manually.
+
+Both modes reuse `build.yml`, so a released binary comes from the exact code
+path every PR exercises.
 
 ---
 

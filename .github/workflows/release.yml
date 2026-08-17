@@ -1,15 +1,24 @@
-# Cuts a versioned release.
+# Publishes builds.
 #
-# Push a tag and every platform builds, then a GitHub Release is published with
-# all the installers attached. Before this existed the team had no way to hand
-# anyone a specific, reproducible version of the app.
+# Two modes:
 #
-#   git tag v0.2.0
-#   git push origin v0.2.0
+#   push to main  -> rebuilds every platform and updates the rolling
+#                    "latest" pre-release in place. Always-current installers
+#                    without having to dig through the Actions tab.
+#
+#   push a v* tag -> a real, permanent, versioned release.
+#                      git tag v0.2.0 && git push origin v0.2.0
+#
+# This workflow owns main. build.yml deliberately does NOT trigger on a push to
+# main, so a merge builds each platform exactly once, not twice.
 name: Release
 
+# No paths-ignore here on purpose. Path filters behave inconsistently for tag
+# pushes, and a release that silently does not happen is far worse than a build
+# that was not strictly necessary.
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -18,18 +27,22 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  # Reuses build.yml exactly, so a release binary is built by the same code path
-  # that has been running on every PR — no second, drifting build definition.
+  # Reuses build.yml exactly, so a released binary comes from the same code path
+  # every PR exercises — no second, drifting build definition.
   build:
     name: Build all platforms
     uses: ./.github/workflows/build.yml
 
   publish:
-    name: Publish GitHub Release
+    name: Publish
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -44,6 +57,8 @@ jobs:
         with:
           path: artifacts
 
+      # Artifacts arrive one directory per platform; the release wants a flat
+      # list of installers.
       - name: Flatten artifact tree
         run: |
           mkdir -p release
@@ -51,24 +66,51 @@ jobs:
             \( -name '*.deb' -o -name '*.AppImage' -o -name '*.exe' \
                -o -name '*.msi' -o -name '*.dmg' -o -name '*.apk' \) \
             -exec cp {} release/ \;
-          echo "Files to be published:"
+          echo "Files to publish:"
           ls -lh release/
+          if [ -z "$(ls -A release/)" ]; then
+            echo "::error::No installers were produced — refusing to publish an empty release."
+            exit 1
+          fi
+
+      # Decide which of the two modes we are in.
+      - name: Determine release mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"; PRE=false; NAME="Offroute $TAG"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            TAG="${{ github.ref_name }}"; PRE=false; NAME="Offroute $TAG"
+          else
+            TAG="latest"; PRE=true; NAME="Latest build (main)"
+          fi
+          {
+            echo "tag=$TAG"
+            echo "prerelease=$PRE"
+            echo "name=$NAME"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate changelog
         id: changelog
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          TAG="${{ steps.mode.outputs.tag }}"
           {
             echo "changelog<<CHANGELOG_EOF"
-            if [ -n "$PREV" ]; then
-              echo "### Perubahan sejak $PREV"
+            if [ "$TAG" = "latest" ]; then
+              echo "### Perubahan terbaru di \`main\`"
               echo ""
-              git log --pretty=format:'- %s (%an)' "$PREV..$TAG"
+              git log --pretty=format:'- %s (%an)' -15
             else
-              echo "### Rilis pertama"
-              echo ""
-              git log --pretty=format:'- %s (%an)' -20
+              PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+              if [ -n "$PREV" ]; then
+                echo "### Perubahan sejak $PREV"
+                echo ""
+                git log --pretty=format:'- %s (%an)' "$PREV..$TAG"
+              else
+                echo "### Rilis pertama"
+                echo ""
+                git log --pretty=format:'- %s (%an)' -20
+              fi
             fi
             echo ""
             echo "CHANGELOG_EOF"
@@ -77,10 +119,13 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          name: Offroute ${{ github.event.inputs.tag || github.ref_name }}
+          tag_name: ${{ steps.mode.outputs.tag }}
+          name: ${{ steps.mode.outputs.name }}
+          prerelease: ${{ steps.mode.outputs.prerelease }}
           files: release/*
-          generate_release_notes: true
+          # The rolling release is replaced wholesale each time, so stale
+          # installers from the previous commit never linger.
+          fail_on_unmatched_files: true
           body: |
             ${{ steps.changelog.outputs.changelog }}
 
@@ -91,13 +136,14 @@ jobs:
             | Platform | Berkas |
             | --- | --- |
             | Windows | `.exe` (installer NSIS) atau `.msi` |
-            | macOS | `.dmg` — pilih `aarch64` untuk Apple Silicon, `x86_64` untuk Intel |
+            | macOS Apple Silicon | `.dmg` (aarch64) |
+            | macOS Intel | `.dmg` (x86_64) |
             | Linux | `.deb` (Debian/Ubuntu) atau `.AppImage` (portable) |
             | Android | `.apk` |
 
-            > **Catatan penting:** APK Android ditandatangani dengan *debug key*,
-            > jadi cocok untuk pengujian tapi belum untuk distribusi publik.
-            > Build iOS masih simulator-only dan tidak ditandatangani.
+            > **Catatan.** APK Android ditandatangani dengan *debug key* — cocok
+            > untuk pengujian, belum untuk distribusi publik. macOS dan Windows
+            > akan menampilkan peringatan "aplikasi tidak dikenal" karena belum
+            > ada code signing certificate.
             >
-            > macOS dan Windows akan menampilkan peringatan "aplikasi tidak
-            > dikenal" karena belum ada code signing certificate.
+            > Build iOS tidak tersedia: butuh akun Apple Developer berbayar.

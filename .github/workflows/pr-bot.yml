@@ -136,7 +136,7 @@ jobs:
                 ? `Artefak (APK, EXE, DEB, DMG) bisa diunduh di [halaman run ini](${run.html_url}) bagian **Artifacts**.`
                 : `@${pr.user.login} — ada yang perlu dicek: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
                   `Buka [log lengkapnya di sini](${run.html_url}), cari baris merah pertama — biasanya itu akar masalahnya.\n\n` +
-                  `> Catatan: job macOS dan iOS masih non-blocking, jadi kalau cuma dua itu yang merah, PR ini tetap boleh di-merge.`,
+                  `> Semua job build sekarang blocking — kalau ada yang merah, itu memang perlu diperbaiki sebelum merge.`,
               '',
               '> Semangat, pasti bisa!',
             ].join('\n');
