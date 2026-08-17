@@ -45,9 +45,40 @@ export interface DbStats {
   flares: number;
 }
 
+/**
+ * Operator's admin secret, matching the server's ADMIN_TOKEN.
+ *
+ * Kept in localStorage rather than baked into the bundle: this is a public
+ * repo, and the radar console is a stationary desktop machine at the command
+ * post, so a locally-stored operator secret is a reasonable stopgap until the
+ * real auth system lands (see TODO.md "Login / auth — deferred").
+ *
+ * Set it once per machine from devtools:
+ *   localStorage.setItem("offroute.adminToken", "<the server's ADMIN_TOKEN>")
+ */
+function getAdminToken(): string {
+  try {
+    return localStorage.getItem("offroute.adminToken")?.trim() ?? "";
+  } catch {
+    // localStorage unavailable (e.g. a hardened webview) — send nothing and
+    // let the server reject it with a clear 401.
+    return "";
+  }
+}
+
 export const adminApi = {
-  stats:  () => api.get<DbStats>("/admin/stats").then((r) => r.data),
-  reseed: () => api.post<{ ok: boolean } & DbStats>("/admin/reseed").then((r) => r.data),
+  stats: () => api.get<DbStats>("/admin/stats").then((r) => r.data),
+  /**
+   * DESTRUCTIVE — wipes every table before reseeding. The server requires
+   * x-admin-token; a 401 means the token is missing or wrong, a 503 means the
+   * server itself has no ADMIN_TOKEN configured.
+   */
+  reseed: () =>
+    api
+      .post<{ ok: boolean } & DbStats>("/admin/reseed", undefined, {
+        headers: { "x-admin-token": getAdminToken() },
+      })
+      .then((r) => r.data),
 };
 
 export const personnelApi = {

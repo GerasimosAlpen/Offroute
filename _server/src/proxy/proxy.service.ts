@@ -1,7 +1,102 @@
 import { Injectable } from "@nestjs/common";
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 
 const MAX_BYTES = 5_000_000;
 const TIMEOUT_MS = 12_000;
+const MAX_REDIRECTS = 5;
+
+/**
+ * SSRF defence for the in-app browser proxy.
+ *
+ * The proxy fetches an arbitrary user-supplied URL server-side, so without this
+ * it is a confused deputy: anything the server can reach — the Postgres box,
+ * a cloud metadata endpoint at 169.254.169.254, other services on the LAN —
+ * becomes reachable by anyone who can call GET /proxy?url=.
+ *
+ * Hostname string matching alone is NOT sufficient, which is what this replaced:
+ *
+ *   1. DNS rebinding. `evil.example.com` is a perfectly ordinary hostname that
+ *      resolves to 127.0.0.1. A string check never sees it.
+ *   2. Redirects. A public URL that 302s to http://169.254.169.254/ passes the
+ *      check on the way in, then lands somewhere internal.
+ *   3. Alternative encodings — 0x7f.0.0.1, 2130706433, IPv6-mapped IPv4.
+ *
+ * So: resolve every hostname and check the actual addresses, and follow
+ * redirects manually, re-checking each hop.
+ */
+function isPrivateHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host === "" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".localhost")
+  );
+}
+
+function isPrivateAddress(address: string, family: number): boolean {
+  if (family === 4) return isPrivateIPv4(address);
+  if (family === 6) return isPrivateIPv6(address);
+  return true; // unknown family — refuse rather than guess
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  const parts = ip.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
+    return true; // unparseable — refuse
+  }
+  const [a, b] = parts as [number, number, number, number];
+  return (
+    a === 0 || // 0.0.0.0/8 "this network"
+    a === 10 || // private
+    a === 127 || // loopback
+    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT
+    (a === 169 && b === 254) || // link-local, incl. cloud metadata
+    (a === 172 && b >= 16 && b <= 31) || // private
+    (a === 192 && b === 168) || // private
+    (a === 192 && b === 0) || // IETF protocol assignments
+    (a === 198 && (b === 18 || b === 19)) || // benchmarking
+    a >= 224 // multicast + reserved
+  );
+}
+
+function isPrivateIPv6(ip: string): boolean {
+  const addr = ip.toLowerCase().split("%")[0]; // strip zone index
+
+  if (addr === "::1" || addr === "::") return true;
+  if (addr.startsWith("fe80")) return true; // link-local
+  if (/^f[cd]/.test(addr)) return true; // unique-local fc00::/7
+
+  // IPv4-mapped (::ffff:127.0.0.1) and IPv4-compatible forms tunnel the whole
+  // IPv4 problem through IPv6 — unwrap and re-check.
+  const mapped = addr.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIPv4(mapped[1]);
+
+  return false;
+}
+
+/**
+ * Resolves a hostname and reports whether ANY address it maps to is private.
+ * All of them must be public — a name resolving to both a public and a private
+ * address is a rebinding attempt, not a coincidence.
+ */
+async function resolvesToPrivateAddress(hostname: string): Promise<boolean> {
+  const bare = hostname.replace(/^\[|\]$/g, "");
+
+  // A literal IP needs no DNS round trip.
+  const literal = isIP(bare);
+  if (literal) return isPrivateAddress(bare, literal);
+
+  try {
+    const results = await lookup(bare, { all: true });
+    if (results.length === 0) return true;
+    return results.some((r) => isPrivateAddress(r.address, r.family));
+  } catch {
+    return true; // cannot resolve — refuse
+  }
+}
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36";
 
@@ -75,19 +170,12 @@ export class ProxyService {
     if (url.protocol !== "http:" && url.protocol !== "https:") {
       return errorPage("Hanya alamat http/https yang didukung.");
     }
-    // Basic SSRF guard — don't let the proxy reach the local machine / LAN.
-    const host = url.hostname.toLowerCase();
-    const blocked =
-      host === "localhost" ||
-      host === "0.0.0.0" ||
-      host === "::1" ||
-      host.endsWith(".local") ||
-      /^127\./.test(host) ||
-      /^10\./.test(host) ||
-      /^192\.168\./.test(host) ||
-      /^169\.254\./.test(host) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-    if (blocked) return errorPage("Alamat lokal/jaringan internal tidak diizinkan.");
+    // Cheap hostname-shaped rejection. This is only the first gate — it cannot
+    // be trusted on its own, because a hostname says nothing about the address
+    // it resolves to. resolvesToPrivateAddress() below is the real check.
+    if (isPrivateHostname(url.hostname)) {
+      return errorPage("Alamat lokal/jaringan internal tidak diizinkan.");
+    }
     return url;
   }
 
@@ -97,20 +185,50 @@ export class ProxyService {
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
     let res: Response;
+    let current = target;
     try {
-      res = await globalThis.fetch(target.toString(), {
-        headers: { "User-Agent": UA, Accept: "text/html,*/*" },
-        redirect: "follow",
-        signal: controller.signal,
-      });
+      // Redirects are followed by hand, one hop at a time, so each destination
+      // gets the same address check as the original URL. With redirect:"follow"
+      // the runtime would chase a 302 into the LAN or a metadata endpoint
+      // before we ever saw where it went.
+      for (let hop = 0; ; hop++) {
+        if (await resolvesToPrivateAddress(current.hostname)) {
+          return errorPage("Alamat lokal/jaringan internal tidak diizinkan.", current.hostname);
+        }
+
+        res = await globalThis.fetch(current.toString(), {
+          headers: { "User-Agent": UA, Accept: "text/html,*/*" },
+          redirect: "manual",
+          signal: controller.signal,
+        });
+
+        const location = res.headers.get("location");
+        if (![301, 302, 303, 307, 308].includes(res.status) || !location) break;
+
+        if (hop >= MAX_REDIRECTS) {
+          return errorPage("Terlalu banyak pengalihan (redirect).", current.hostname);
+        }
+
+        const next = new URL(location, current);
+        if (next.protocol !== "http:" && next.protocol !== "https:") {
+          return errorPage("Pengalihan ke protokol yang tidak didukung.", next.protocol);
+        }
+        if (isPrivateHostname(next.hostname)) {
+          return errorPage("Alamat lokal/jaringan internal tidak diizinkan.", next.hostname);
+        }
+        current = next;
+      }
     } catch {
-      return errorPage("Gagal terhubung ke situs.", target.hostname);
+      return errorPage("Gagal terhubung ke situs.", current.hostname);
     } finally {
       clearTimeout(timer);
     }
 
-    const finalUrl = res.url || target.toString();
+    // With manual redirects res.url is the URL we actually requested last,
+    // which is what relative-link rewriting must resolve against.
+    const finalUrl = current.toString();
     const contentType = res.headers.get("content-type") ?? "application/octet-stream";
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length > MAX_BYTES) {

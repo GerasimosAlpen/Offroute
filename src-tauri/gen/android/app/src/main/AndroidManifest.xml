@@ -1,6 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+      Location. The app's core job is routing to evacuation points, and on
+      Android 11 and below a BLE scan is also treated as a location request.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!--
+      Bluetooth, for the Tier 1 BLE relay (src-tauri/src/commands/bluetooth.rs).
+
+      Android 12+ (API 31) split the old BLUETOOTH/BLUETOOTH_ADMIN pair into
+      the _SCAN / _CONNECT runtime permissions; the legacy pair is still needed
+      for API 30 and below, hence maxSdkVersion on those two. The app's minSdk
+      is 24, so both eras are in scope.
+
+      usesPermissionFlags="neverForLocation" is NOT set: scan results here are
+      used to locate people during an evacuation, which is exactly the
+      location-deriving case the flag asserts you are not doing.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!--
+      Declared optional so the app still installs on hardware without BLE.
+      Anything Bluetooth-dependent must degrade gracefully rather than crash.
+    -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

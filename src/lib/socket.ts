@@ -21,6 +21,12 @@ export const socket: Socket = io(getApiBaseUrl(), {
   transports: ["websocket"],
 });
 
-socket.on("connect", () => console.log("[WS] Connected:", socket.id));
-socket.on("disconnect", (reason) => console.log("[WS] Disconnected:", reason));
+// Connect/disconnect are routine in the field — the socket retries forever by
+// design, because intermittent links are the normal case during a disaster, not
+// an error. Log them only in development so a packaged build's console stays
+// readable; genuine failures still warn in every build.
+if (import.meta.env.DEV) {
+  socket.on("connect", () => console.log("[WS] Connected:", socket.id));
+  socket.on("disconnect", (reason) => console.log("[WS] Disconnected:", reason));
+}
 socket.on("connect_error", (err) => console.warn("[WS] Connection error:", err.message));
