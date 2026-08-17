@@ -45,7 +45,10 @@
     "rules": {
       "tags": ["recommended"],
       "exclude": [
-        "no-explicit-any"
+        "no-explicit-any",
+        "no-window",
+        "no-window-prefix",
+        "require-await"
       ]
     }
   },

@@ -592,6 +592,24 @@ imported by the frontend).
 not exist**, and roughly 170 of the 188 lines of `src/App.css` are unused
 shadcn design tokens while every component hardcodes hex colours.
 
+### Lint backlog
+
+`deno lint` is wired into CI as **advisory** (`continue-on-error`), because it
+had never run against this codebase before and failing every PR on day one
+would be useless. It currently reports **31 problems across 160 files**:
+
+| Rule | Count | Notes |
+|---|---|---|
+| `jsx-button-has-type` | 29 | A `<button>` without `type` defaults to `submit`, which misfires inside a form. Real, low severity. |
+| `jsx-curly-braces` | 1 | Style. |
+| `no-process-global` | 1 | `vite.config.ts` reading `process.env.TAURI_DEV_HOST` — legitimate for a Vite config file. |
+
+Three Deno-specific rules are disabled in `deno.json` because they assume a
+Deno runtime rather than a browser, and fire constantly on correct code:
+`no-window`, `no-window-prefix`, `require-await`.
+
+Clear the 29 and you can flip the Lint step to blocking.
+
 ### Other known issues
 
 - **Routing uses the OSRM public demo server** (`router.project-osrm.org`),
