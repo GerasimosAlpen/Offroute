@@ -1,0 +1,69 @@
+{
+  "$schema": "https://deno.land/x/deno/cli/schemas/config-file.v1.json",
+
+  "nodeModulesDir": "auto",
+
+  "tasks": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "deno lint",
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check"
+  },
+
+  "fmt": {
+    "useTabs": false,
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "semiColons": true,
+    "singleQuote": false,
+    "exclude": [
+      "dist/",
+      "node_modules/",
+      "src-tauri/gen/",
+      "src-tauri/target/",
+      "_server/",
+      "deno.lock",
+      "package-lock.json",
+      "*.md"
+    ]
+  },
+
+  "lint": {
+    "exclude": [
+      "dist/",
+      "node_modules/",
+      "src-tauri/gen/",
+      "src-tauri/target/",
+      "_server/"
+    ],
+    "rules": {
+      "tags": ["recommended"],
+      "exclude": [
+        "no-explicit-any",
+        "no-window",
+        "no-window-prefix",
+        "require-await"
+      ]
+    }
+  },
+
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+
+  "exclude": [
+    "dist/",
+    "node_modules/",
+    "src-tauri/gen/",
+    "src-tauri/target/",
+    "_server/"
+  ]
+}

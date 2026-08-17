@@ -7,18 +7,43 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies
 node_modules
+
+# Build output
 dist
 dist-ssr
+build
 *.local
+*.tsbuildinfo
+.vite/
+
+# Environment — never commit real credentials.
+# See docs.md "Environment variables" and .env.example for the required keys.
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 .idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# macOS.
+# This repo is often checked out on an exFAT volume, where macOS writes an
+# AppleDouble "._<name>" sidecar next to every file — including inside .git/,
+# where git tries to parse "._pack-*.idx" as a real pack index and errors on
+# every command. Set `export COPYFILE_DISABLE=1` to stop them being created.
+# See docs.md "Troubleshooting".
+.DS_Store
+._*
+
+# Next.js — not used by this project. Guarded so a stray `next` invocation
+# can never re-commit build output into a Vite/Preact repo again.
+.next/
+next-env.d.ts

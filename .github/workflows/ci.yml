@@ -1,205 +1,217 @@
-name: "CI/CD Offroute"
+# Fast feedback on every push and PR.
+#
+# This is the gate that should stay green and stay quick (~2-4 min). It never
+# builds a native binary — that is build.yml's job, and it is deliberately
+# kept separate so a typo in a README does not cost 40 minutes of runner time.
+name: CI
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
+
+# One run per branch. A new push cancels the previous, still-running check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this workflow only ever reads the repo.
+permissions:
+  contents: read
 
 jobs:
-  pr_inspector:
-    name: PR Inspector
+  # ---------------------------------------------------------------------------
+  # Works out what actually changed, so heavy jobs can skip themselves on a
+  # docs-only PR. Every downstream job reads these outputs.
+  # ---------------------------------------------------------------------------
+  changes:
+    name: Detect changed areas
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     outputs:
-      authors: ${{ steps.get_authors.outputs.authors }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      rust: ${{ steps.filter.outputs.rust }}
+      server: ${{ steps.filter.outputs.server }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
         with:
-          fetch-depth: 0
-      
-      - name: Get Commit Authors
-        id: get_authors
+          filters: |
+            frontend:
+              - 'src/**'
+              - 'index.html'
+              - 'vite.config.ts'
+              - 'tsconfig*.json'
+              - 'deno.json'
+              - 'deno.lock'
+              - 'package.json'
+            rust:
+              - 'src-tauri/**'
+            server:
+              - '_server/**'
+
+  # ---------------------------------------------------------------------------
+  # Frontend: typecheck + lint + format + tests.
+  #
+  # Note this repo had NO lint or format config for its 157-file frontend until
+  # now, so `deno lint` runs in report-only mode (continue-on-error) rather than
+  # failing every PR on day one. Flip it to blocking once the backlog is clear.
+  # ---------------------------------------------------------------------------
+  frontend:
+    name: Frontend (typecheck, lint, test)
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+          cache: true
+
+      - name: Install dependencies
+        run: deno install
+
+      # The real gate. tsconfig has strict + noUnusedLocals + noUnusedParameters
+      # turned on, and this repo has shipped a broken tsc before, so this is the
+      # single most valuable check in the whole pipeline.
+      - name: Typecheck
+        run: deno task typecheck
+
+      - name: Format check
+        run: deno task fmt:check
+        continue-on-error: true
+
+      - name: Lint
+        run: deno task lint
+        continue-on-error: true
+
+      - name: Test
+        run: deno task test
+
+      # Proves the production bundle actually builds — this is exactly what
+      # tauri.conf.json's beforeBuildCommand runs, so a failure here means every
+      # native build in build.yml would fail too, just 30 minutes later.
+      - name: Build frontend bundle
+        run: deno task build
+
+  # ---------------------------------------------------------------------------
+  # Rust / Tauri: format, clippy, and a type-level check.
+  # `cargo check` rather than a full build — build.yml does the real thing.
+  # ---------------------------------------------------------------------------
+  rust:
+    name: Rust (fmt, clippy, check)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
         run: |
-          # Dapatkan semua author unik dari commit di PR ini
-          AUTHORS=$(git log --format='%an' origin/${{ github.base_ref }}..HEAD | sort -u | paste -sd ", " -)
-          echo "authors=$AUTHORS" >> $GITHUB_OUTPUT
-          echo "Daftar tersangka: $AUTHORS"
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            patchelf \
+            build-essential
 
-      - name: Send PR Comment (Estimasi & Witch Hunt)
-        uses: actions/github-script@v7
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          script: |
-            const authors = '${{ steps.get_authors.outputs.authors }}';
-            const body = `### Sedang Menginspeksi Perubahan Anda...\n\n**Daftar Pelaku Commit:** ${authors || 'Tidak diketahui'}\n\n **Estimasi Build Time:**\n-  **Android:** ~10-15 Menit\n-  **Windows:** ~5-10 Menit\n-  **Linux:** ~5-10 Menit\n\n⚠️ *Ingat: Jika build hancur, kita sudah tahu siapa yang harus diburu! (F*CK THEM UP!)* ⚔️`;
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            })
+          components: rustfmt, clippy
 
-  build_mobile:
-    name: 📱 Build Mobile (Android)
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ci-lint
+
+      # Tauri's build script needs ../dist to exist to generate its context.
+      - name: Stub frontend dist
+        run: mkdir -p dist && echo '<!doctype html><title>ci</title>' > dist/index.html
+
+      - name: Format check
+        working-directory: src-tauri
+        run: cargo fmt --all --check
+        continue-on-error: true
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+
+      - name: Check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+  # ---------------------------------------------------------------------------
+  # NestJS backend. Previously CI ignored _server/ entirely, despite it being
+  # 11 modules, 34 REST endpoints and a 16-event Socket.IO gateway.
+  # ---------------------------------------------------------------------------
+  server:
+    name: Backend (_server)
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: _server
     steps:
       - uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _server/package-lock.json
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'zulu'
-          java-version: '17'
+      # Prisma's client is generated, not committed — nothing compiles without it.
+      - name: Generate Prisma client
+        run: npx prisma generate
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android, armv7-linux-androideabi, i686-linux-android, x86_64-linux-android
+      - name: Build
+        run: npm run build
 
-      - name: Install Cargo NDK
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: cargo install cargo-ndk
+      # Unit tests only. The e2e suite imports the full AppModule and needs a
+      # live Postgres, so it is not run here.
+      - name: Test
+        run: npm run test
 
-      - name: Install dependencies (NPM)
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: npm ci
-
-      - name: Build Android APK
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 30
-          max_attempts: 3
-          command: deno task tauri android build
-
-      - name: Upload Android Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: Offroute-Android-APK
-          path: src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
-          retention-days: 7
-
-  build_desktop:
-    name: Build Desktop (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: windows
-          - os: ubuntu-latest
-            target: linux
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Install dependencies (Linux only)
-        if: matrix.os == 'ubuntu-latest'
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install frontend dependencies
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: npm ci
-
-      - name: Build Desktop App
-        uses: nick-fields/retry@v3
-        with:
-          timeout_minutes: 30
-          max_attempts: 3
-          command: deno task tauri build
-
-      - name: Upload Windows Artifacts
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Offroute-Windows-EXE
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          retention-days: 7
-
-      - name: Upload Linux Artifacts
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Offroute-Linux-Deb
-          path: src-tauri/target/release/bundle/deb/*.deb
-          retention-days: 7
-
-  report_results:
-    name: Final Report 
-    needs: [pr_inspector, build_mobile, build_desktop]
-    if: always() && github.event_name == 'pull_request'
+  # ---------------------------------------------------------------------------
+  # Single required status check. Branch protection can point at just this job
+  # instead of tracking every matrix leg by name.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    name: CI OK
+    if: always()
+    needs: [frontend, rust, server]
     runs-on: ubuntu-latest
     steps:
-      - name: Compile Report
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const mobileStatus = '${{ needs.build_mobile.result }}';
-            const desktopStatus = '${{ needs.build_desktop.result }}';
-            const authors = '${{ needs.pr_inspector.outputs.authors }}';
-            
-            let statusIcon = (mobileStatus === 'success' && desktopStatus === 'success') ? '✅' : '❌';
-            
-            let body = `### ${statusIcon} Hasil Eksekusi CI/CD Offroute\n\n`;
-            
-            if (mobileStatus === 'success' && desktopStatus === 'success') {
-              body += `Selamat! Semua platform berhasil di-build tanpa masalah. 🙏\n`;
-              body += `> Silakan cek tab **Actions** > **Artifacts** di atas untuk mendownload mentahan APK, EXE, dan DEB.`;
-            } else {
-              body += `**Peringatan Keras!** Terdapat error saat proses build. 🚨\n\n`;
-              body += `- 📱 Status Android: **${mobileStatus}**\n`;
-              body += `- 💻 Status Desktop (Windows/Linux): **${desktopStatus}**\n\n`;
-              body += `**Tersangka Utama (Authors):** ${authors || 'Tidak diketahui'}\n`;
-              body += `\n> *Pesan Otomatis: Segera perbaiki kode Anda! Auto-heal 3x sudah gagal, cek log errornya langsung dan copy! F\*CK THEM UP! 🔪*`;
-            }
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: body
-            })
+      - name: Verify no job failed
+        run: |
+          results="${{ join(needs.*.result, ' ') }}"
+          echo "Job results: $results"
+          for r in $results; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "::error::A required CI job did not pass."
+              exit 1
+            fi
+          done
+          echo "All required CI jobs passed (skipped jobs are OK)."

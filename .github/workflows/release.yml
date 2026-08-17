@@ -1,0 +1,103 @@
+# Cuts a versioned release.
+#
+# Push a tag and every platform builds, then a GitHub Release is published with
+# all the installers attached. Before this existed the team had no way to hand
+# anyone a specific, reproducible version of the app.
+#
+#   git tag v0.2.0
+#   git push origin v0.2.0
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Reuses build.yml exactly, so a release binary is built by the same code path
+  # that has been running on every PR — no second, drifting build definition.
+  build:
+    name: Build all platforms
+    uses: ./.github/workflows/build.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p release
+          find artifacts -type f \
+            \( -name '*.deb' -o -name '*.AppImage' -o -name '*.exe' \
+               -o -name '*.msi' -o -name '*.dmg' -o -name '*.apk' \) \
+            -exec cp {} release/ \;
+          echo "Files to be published:"
+          ls -lh release/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          {
+            echo "changelog<<CHANGELOG_EOF"
+            if [ -n "$PREV" ]; then
+              echo "### Perubahan sejak $PREV"
+              echo ""
+              git log --pretty=format:'- %s (%an)' "$PREV..$TAG"
+            else
+              echo "### Rilis pertama"
+              echo ""
+              git log --pretty=format:'- %s (%an)' -20
+            fi
+            echo ""
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: Offroute ${{ github.event.inputs.tag || github.ref_name }}
+          files: release/*
+          generate_release_notes: true
+          body: |
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+
+            ### Unduhan
+
+            | Platform | Berkas |
+            | --- | --- |
+            | Windows | `.exe` (installer NSIS) atau `.msi` |
+            | macOS | `.dmg` — pilih `aarch64` untuk Apple Silicon, `x86_64` untuk Intel |
+            | Linux | `.deb` (Debian/Ubuntu) atau `.AppImage` (portable) |
+            | Android | `.apk` |
+
+            > **Catatan penting:** APK Android ditandatangani dengan *debug key*,
+            > jadi cocok untuk pengujian tapi belum untuk distribusi publik.
+            > Build iOS masih simulator-only dan tidak ditandatangani.
+            >
+            > macOS dan Windows akan menampilkan peringatan "aplikasi tidak
+            > dikenal" karena belum ada code signing certificate.

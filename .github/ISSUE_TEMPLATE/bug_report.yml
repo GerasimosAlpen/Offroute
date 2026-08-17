@@ -1,0 +1,80 @@
+name: Laporan Bug
+description: Ada yang rusak atau tidak sesuai harapan
+title: 'fix: '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Terima kasih sudah melaporkan. Makin detail, makin cepat ketemu akar masalahnya.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Apa yang terjadi
+      description: Jelaskan bug-nya. Screenshot atau rekaman layar sangat membantu.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Yang diharapkan
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Langkah untuk mengulang
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Halaman mana
+      options:
+        - Warga (/user)
+        - Personel lapangan (/ranger/personel)
+        - Ranger Command / radar (/ranger/radar)
+        - SOS (/sos)
+        - Backend (_server)
+        - CI / build
+        - Lainnya
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Dijalankan di mana
+      description: Perilaku browser dan Tauri memang bisa berbeda — Bluetooth dan GPS terutama.
+      options:
+        - Tauri desktop (macOS)
+        - Tauri desktop (Windows)
+        - Tauri desktop (Linux)
+        - Tauri Android (APK)
+        - Browser desktop
+        - Browser mobile
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Error di console / log
+      description: Buka DevTools, tab Console. Tempel error yang merah.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Sudah dicek
+      options:
+        - label: Backend (`_server`) sedang jalan dan bisa diakses
+        - label: Sudah cek `TODO.md` — fitur ini memang seharusnya sudah nyata, bukan simulasi

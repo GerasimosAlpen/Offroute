@@ -1,0 +1,44 @@
+# Review routing, mirroring the division of labour in the GEMASTIK proposal
+# (Bagian VII — Implementasi Perangkat Lunak):
+#
+#   Daffa    (@hiyokun-d)      — arsitektur, graph & routing engine
+#   Gerasimos(@GerasimosAlpen) — data parser, struktur graph, backend
+#   Adrian   (@kndehh)         — front-end, sinkronisasi, dashboard
+#
+# A CODEOWNER is auto-requested for review. It does not block a merge unless
+# branch protection is configured to require it.
+
+# Default: anything not matched below goes to the team lead.
+*                           @hiyokun-d
+
+# --- Frontend (Preact) --------------------------------------------------------
+/src/                       @kndehh @hiyokun-d
+/src/user/                  @kndehh
+/src/ranger/personel/       @kndehh
+/src/ranger/radar/          @kndehh @hiyokun-d
+/index.html                 @kndehh
+/vite.config.ts             @kndehh @hiyokun-d
+
+# --- Routing engine: the core of the proposal (WPMTRS) ------------------------
+/src/lib/routing.ts         @hiyokun-d
+/src/lib/hazards.ts         @hiyokun-d
+
+# --- Rust / Tauri native shell ------------------------------------------------
+/src-tauri/                 @hiyokun-d
+/src-tauri/src/commands/bluetooth.rs  @hiyokun-d
+
+# --- Backend (NestJS + Prisma) ------------------------------------------------
+/_server/                   @GerasimosAlpen
+/_server/prisma/            @GerasimosAlpen @hiyokun-d
+
+# --- Build, CI and release ----------------------------------------------------
+# Changes here can break everyone's ability to ship, so both leads see them.
+/.github/                   @hiyokun-d @GerasimosAlpen
+/deno.json                  @hiyokun-d @GerasimosAlpen
+/deno.lock                  @hiyokun-d @GerasimosAlpen
+/package.json               @hiyokun-d @GerasimosAlpen
+
+# --- Documentation ------------------------------------------------------------
+/README.md                  @hiyokun-d
+/docs.md                    @hiyokun-d
+/TODO.md                    @hiyokun-d

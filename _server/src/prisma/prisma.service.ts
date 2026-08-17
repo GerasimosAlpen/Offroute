@@ -2,11 +2,39 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from "@nestjs/common";
 import { Pool } from "pg";
 import { PrismaPg } from "@prisma/adapter-pg";
 
-// Prisma v7 generated client must be required (not imported) so the path is
-// resolved at runtime from the dist/ folder correctly. The generated/prisma
-// folder is at the _server root level, not inside dist/.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { PrismaClient: BasePrismaClient } = require("../../../generated/prisma/index.js");
+// The Prisma v7 client is generated to _server/generated/prisma — outside both
+// src/ and dist/ — so it must be required at runtime rather than imported.
+//
+// The relative depth is NOT the same in every context: from the compiled
+// dist/src/prisma/ it is three levels up, but when the same file runs straight
+// from src/prisma/ under ts-jest it is only two. Hardcoding the dist depth is
+// why `npm test` used to fail to even load this module. Try both.
+// The generated client has no static type here (it is required at runtime, not
+// imported), so this mirrors the untyped shape the rest of this file expects.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type PrismaClientCtor = new (...args: any[]) => any;
+
+function loadPrismaClient(): { PrismaClient: PrismaClientCtor } {
+  const candidates = [
+    "../../../generated/prisma/index.js", // dist/src/prisma  -> _server/generated
+    "../../generated/prisma/index.js", // src/prisma       -> _server/generated
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require(candidate);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "MODULE_NOT_FOUND") throw error;
+    }
+  }
+
+  throw new Error(
+    "Prisma client not found. Run `npx prisma generate` in _server/ before starting the server.",
+  );
+}
+
+const { PrismaClient: BasePrismaClient } = loadPrismaClient();
 
 /**
  * Global Prisma service using PrismaPg adapter (required by Prisma v7).

@@ -1,0 +1,65 @@
+# Path -> label rules for .github/workflows/labeler.yml (actions/labeler v5).
+
+'area:frontend':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/**'
+          - 'index.html'
+          - 'vite.config.ts'
+
+'area:rust':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src-tauri/**'
+
+'area:backend':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '_server/**'
+
+'area:ci':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/**'
+
+'area:docs':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+
+'area:deps':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'deno.json'
+          - 'deno.lock'
+          - 'package.json'
+          - 'src-tauri/Cargo.toml'
+          - 'src-tauri/Cargo.lock'
+          - '_server/package.json'
+          - '_server/package-lock.json'
+
+# The two features the proposal calls out as core, so PRs touching them are
+# easy to find later.
+'feature:routing':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/lib/routing.ts'
+          - 'src/ranger/radar/components/tactical-map/**'
+
+'feature:flare':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/store/flare.ts'
+          - 'src/ranger/radar/components/tactical-map/flare/**'
+          - '_server/src/flare/**'
+
+'feature:bluetooth':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src-tauri/src/commands/bluetooth.rs'
+          - 'src/store/bluetooth.ts'
+
+'database':
+  - changed-files:
+      - any-glob-to-any-file:
+          - '_server/prisma/**'
