@@ -1,45 +1,45 @@
-name: Tugas Sprint
-description: Item kerja untuk sprint berjalan
+name: Sprint task
+description: A work item for the current sprint
 title: 'task: '
 labels: ['sprint-task']
 body:
   - type: markdown
     attributes:
       value: |
-        Untuk memecah pekerjaan sprint sesuai fase di proposal (Tabel 1).
+        For breaking sprint work down against the phases in the proposal (Table 1).
 
   - type: textarea
     id: description
     attributes:
-      label: Yang perlu dikerjakan
+      label: What needs doing
     validations:
       required: true
 
   - type: dropdown
     id: phase
     attributes:
-      label: Fase pengembangan
+      label: Development phase
       options:
-        - 'Fase 1 (Minggu 1-2) — PBF Parser (Rust)'
-        - 'Fase 2 (Minggu 3-4) — Graph Builder + Dijkstra'
-        - 'Fase 3 (Minggu 5-7) — Contraction Hierarchies + fungsi biaya'
-        - 'Fase 4 (Minggu 8-9) — Query multi target, UDP sync, Lapor Insiden'
-        - 'Fase 5 (Minggu 10-11) — Mode Flare, Comm Center, dashboard, uji eksternal'
-        - 'Fase 6 (Minggu 12) — End to end testing, dokumentasi, demo'
-        - 'Di luar fase (maintenance / bug / tooling)'
+        - 'Phase 1 (Weeks 1-2) — PBF parser (Rust)'
+        - 'Phase 2 (Weeks 3-4) — Graph builder + Dijkstra'
+        - 'Phase 3 (Weeks 5-7) — Contraction Hierarchies + cost function'
+        - 'Phase 4 (Weeks 8-9) — Multi-target query, UDP sync, incident reporting'
+        - 'Phase 5 (Weeks 10-11) — FLARE mode, Comm Center, dashboard, external testing'
+        - 'Phase 6 (Week 12) — End-to-end testing, documentation, demo'
+        - 'Outside the phases (maintenance / bug / tooling)'
     validations:
       required: true
 
   - type: dropdown
     id: owner
     attributes:
-      label: Penanggung jawab
-      description: Sesuai pembagian di proposal Bagian VII.
+      label: Owner
+      description: Following the split in proposal section VII.
       options:
-        - 'Daffa — arsitektur, graph & routing engine'
-        - 'Gerasimos — data parser, struktur graph, backend'
-        - 'Adrian — front-end, sinkronisasi, dashboard'
-        - 'Belum ditentukan'
+        - 'Daffa — architecture, graph and routing engine'
+        - 'Gerasimos — data parser, graph structures, backend'
+        - 'Adrian — front-end, synchronisation, dashboard'
+        - 'Unassigned'
     validations:
       required: true
 
@@ -47,16 +47,16 @@ body:
     id: done
     attributes:
       label: Definition of done
-      description: Kapan tugas ini boleh dianggap selesai?
+      description: When is this task allowed to be called finished?
       value: |
-        - [ ] Implementasi selesai
-        - [ ] `deno task typecheck` dan `deno task build` lolos
-        - [ ] Sudah diuji manual
-        - [ ] `TODO.md` diperbarui kalau ada yang masih simulasi
+        - [ ] Implementation complete
+        - [ ] `deno task typecheck` and `deno task build` pass
+        - [ ] Manually tested
+        - [ ] `TODO.md` updated if anything remains simulated
     validations:
       required: true
 
   - type: textarea
     id: blockers
     attributes:
-      label: Blocker atau ketergantungan
+      label: Blockers or dependencies

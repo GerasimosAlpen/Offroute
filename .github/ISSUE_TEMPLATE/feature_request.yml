@@ -1,32 +1,32 @@
-name: Usulan Fitur
-description: Ide fitur baru atau perbaikan
+name: Feature request
+description: A new feature or an improvement
 title: 'feat: '
 labels: ['enhancement']
 body:
   - type: textarea
     id: problem
     attributes:
-      label: Masalah yang mau diselesaikan
-      description: Mulai dari masalahnya, bukan dari solusinya.
+      label: The problem to solve
+      description: Start from the problem, not the solution.
     validations:
       required: true
 
   - type: textarea
     id: solution
     attributes:
-      label: Usulan solusi
+      label: Proposed solution
     validations:
       required: true
 
   - type: dropdown
     id: persona
     attributes:
-      label: Untuk siapa
+      label: Who it is for
       options:
-        - Warga (masyarakat terdampak)
-        - Personel lapangan (SAR / relawan)
-        - Operator (BPBD / posko, Ranger Command)
-        - Semua
+        - Citizens (affected public)
+        - Field personnel (SAR / volunteers)
+        - Operators (BPBD / command post, Ranger Command)
+        - Everyone
         - Internal (developer / tooling)
     validations:
       required: true
@@ -34,32 +34,32 @@ body:
   - type: dropdown
     id: requirement
     attributes:
-      label: Terkait kebutuhan fungsional yang mana (proposal Tabel 2)
+      label: Related functional requirement (proposal, Table 2)
       options:
-        - 'FR-01 — Hitung rute teraman ke titik evakuasi (WPMTRS)'
-        - 'FR-02 — Update bobot bahaya dari laporan insiden'
-        - 'FR-03 — Lapor insiden dengan lokasi dan foto'
-        - 'FR-04 — Mode Flare via BLE'
-        - 'FR-05 — Tactical map, log insiden, status unit'
-        - 'FR-06 — Sinkronisasi lewat UDP multicast'
-        - 'FR-07 — Kelola titik evakuasi dan kapasitas'
-        - 'FR-08 — Simpan log laporan dan histori rute'
-        - 'FR-09 — Unduh peta offline'
-        - 'Tidak terkait FR mana pun (ide baru)'
+        - 'FR-01 — Compute the safest route to an evacuation point (WPMTRS)'
+        - 'FR-02 — Update hazard weights from incident reports'
+        - 'FR-03 — Report incidents with location and photo'
+        - 'FR-04 — FLARE mode via BLE'
+        - 'FR-05 — Tactical map, incident log, unit status'
+        - 'FR-06 — Sync via UDP multicast'
+        - 'FR-07 — Manage evacuation points and capacity'
+        - 'FR-08 — Persist report logs and route history'
+        - 'FR-09 — Download offline maps'
+        - 'Not related to any FR (new idea)'
 
   - type: dropdown
     id: offline
     attributes:
-      label: Apakah harus jalan tanpa internet
-      description: Offline-first adalah alasan utama aplikasi ini ada. Fitur yang butuh cloud perlu justifikasi.
+      label: Must it work without internet?
+      description: Offline-first is the main reason this app exists. Anything needing the cloud needs justification.
       options:
-        - 'Ya — wajib jalan offline'
-        - 'Tidak — boleh butuh internet'
-        - 'Sebagian — jalan offline dengan kemampuan terbatas'
+        - 'Yes — must work offline'
+        - 'No — may require internet'
+        - 'Partly — works offline with reduced capability'
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatif yang sudah dipertimbangkan
+      label: Alternatives considered

@@ -1,4 +1,4 @@
-# The PR bot ("witch hunt" — semangatnya tetap, kata kasarnya sudah tidak).
+# The PR bot ("witch hunt" — same spirit, without the swearing).
 #
 # Two triggers, on purpose:
 #
@@ -30,7 +30,7 @@ permissions:
 jobs:
   # ---------------------------------------------------------------------------
   greet:
-    name: Salam pembuka
+    name: Greeting
     if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     steps:
@@ -40,30 +40,30 @@ jobs:
             const marker = '<!-- offroute-pr-bot -->';
             const body = [
               marker,
-              '### Offroute CI sedang memeriksa perubahan kamu',
+              '### Offroute CI is inspecting your changes',
               '',
-              `**Pembuat PR:** @${context.payload.pull_request.user.login}`,
+              `**Opened by:** @${context.payload.pull_request.user.login}`,
               '',
-              '**Perkiraan waktu.** Angka ini diukur dari run nyata di repo ini,',
-              'bukan tebakan. Semua job jalan paralel, jadi total ≈ job terlama.',
+              '**Expected timings.** Measured from real runs in this repo, not guessed.',
+              'All jobs run in parallel, so the total is roughly the slowest one.',
               '',
-              '| Job | Cache dingin | Cache panas |',
+              '| Job | Cold cache | Warm cache |',
               '| --- | --- | --- |',
-              '| CI (typecheck, test, lint) | ~2 menit | ~2 menit |',
-              '| Security | ~1 menit | ~1 menit |',
-              '| macOS Apple Silicon | ~6 menit | ~3 menit |',
-              '| Linux | ~8 menit | ~4 menit |',
-              '| Windows | ~10 menit | ~5 menit |',
-              '| macOS Intel | ~10 menit | ~5 menit |',
-              '| Android | ~16 menit | ~7 menit |',
-              '| **Total (paralel)** | **~16 menit** | **~7 menit** |',
+              '| CI (typecheck, test, lint) | ~2 min | ~2 min |',
+              '| Security | ~1 min | ~1 min |',
+              '| macOS Apple Silicon | ~6 min | ~3 min |',
+              '| Linux | ~8 min | ~4 min |',
+              '| Windows | ~10 min | ~5 min |',
+              '| macOS Intel | ~10 min | ~5 min |',
+              '| Android | ~16 min | ~7 min |',
+              '| **Total (parallel)** | **~16 min** | **~7 min** |',
               '',
-              '"Cache dingin" = pertama kali setelah `Cargo.toml`, `deno.lock`, atau',
-              'toolchain berubah. Selain itu cache Rust/Gradle/Deno kepakai.',
+              '"Cold cache" means the first run after `Cargo.toml`, `deno.lock`, or the',
+              'toolchain changes. Otherwise the Rust/Gradle/Deno caches apply.',
               '',
-              '> Komentar ini akan diperbarui otomatis kalau build sudah selesai —',
-              '> tidak ada komentar baru, jadi PR tidak kebanjiran.',
-              '> Kalau ada yang merah, jangan panik: log lengkapnya ada di tab **Actions**.',
+              '> This comment updates itself when the build finishes — no new comments,',
+              '> so the PR stays readable.',
+              '> If something goes red, the full log is in the **Actions** tab.',
             ].join('\n');
 
             await github.rest.issues.createComment({
@@ -75,7 +75,7 @@ jobs:
 
   # ---------------------------------------------------------------------------
   report:
-    name: Laporan hasil build
+    name: Build result report
     if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -106,14 +106,14 @@ jobs:
             );
 
             const icon = (c) => ({
-              success: 'Berhasil',
-              failure: 'Gagal',
-              cancelled: 'Dibatalkan',
-              skipped: 'Dilewati',
-            }[c] ?? c ?? 'Tidak diketahui');
+              success: 'Passed',
+              failure: 'Failed',
+              cancelled: 'Cancelled',
+              skipped: 'Skipped',
+            }[c] ?? c ?? 'Unknown');
 
             const rows = jobs
-              .filter((j) => j.name !== 'Laporan hasil build')
+              .filter((j) => j.name !== 'Build result report')
               .map((j) => `| ${j.name} | ${icon(j.conclusion)} |`)
               .join('\n');
 
@@ -123,22 +123,22 @@ jobs:
             const body = [
               marker,
               ok
-                ? '### Semua build berhasil'
-                : '### Ada build yang gagal',
+                ? '### All builds passed'
+                : '### Some builds failed',
               '',
-              `**Commit:** \`${run.head_sha.slice(0, 7)}\` oleh @${pr.user.login}`,
+              `**Commit:** \`${run.head_sha.slice(0, 7)}\` by @${pr.user.login}`,
               '',
               '| Job | Status |',
               '| --- | --- |',
               rows,
               '',
               ok
-                ? `Artefak (APK, EXE, DEB, DMG) bisa diunduh di [halaman run ini](${run.html_url}) bagian **Artifacts**.`
-                : `@${pr.user.login} — ada yang perlu dicek: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
-                  `Buka [log lengkapnya di sini](${run.html_url}), cari baris merah pertama — biasanya itu akar masalahnya.\n\n` +
-                  `> Semua job build sekarang blocking — kalau ada yang merah, itu memang perlu diperbaiki sebelum merge.`,
+                ? `Artifacts (APK, EXE, DEB, DMG) are on [this run's page](${run.html_url}) under **Artifacts**.`
+                : `@${pr.user.login} — needs a look: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
+                  `Open the [full log here](${run.html_url}) and find the first red line — that is usually the root cause.\n\n` +
+                  `> Every build job is blocking, so anything red does need fixing before merge.`,
               '',
-              '> Semangat, pasti bisa!',
+              '> You have got this.',
             ].join('\n');
 
             // Update the sticky comment if it exists, otherwise create it.

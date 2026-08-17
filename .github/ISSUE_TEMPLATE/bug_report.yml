@@ -1,32 +1,32 @@
-name: Laporan Bug
-description: Ada yang rusak atau tidak sesuai harapan
+name: Bug report
+description: Something is broken or behaving unexpectedly
 title: 'fix: '
 labels: ['bug']
 body:
   - type: markdown
     attributes:
       value: |
-        Terima kasih sudah melaporkan. Makin detail, makin cepat ketemu akar masalahnya.
+        Thanks for reporting. The more detail, the faster the root cause turns up.
 
   - type: textarea
     id: what-happened
     attributes:
-      label: Apa yang terjadi
-      description: Jelaskan bug-nya. Screenshot atau rekaman layar sangat membantu.
+      label: What happened
+      description: Describe the bug. A screenshot or screen recording helps a lot.
     validations:
       required: true
 
   - type: textarea
     id: expected
     attributes:
-      label: Yang diharapkan
+      label: What you expected instead
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: Langkah untuk mengulang
+      label: Steps to reproduce
       value: |
         1.
         2.
@@ -37,44 +37,44 @@ body:
   - type: dropdown
     id: surface
     attributes:
-      label: Halaman mana
+      label: Which surface
       options:
-        - Warga (/user)
-        - Personel lapangan (/ranger/personel)
+        - Citizen (/user)
+        - Field personnel (/ranger/personel)
         - Ranger Command / radar (/ranger/radar)
         - SOS (/sos)
         - Backend (_server)
         - CI / build
-        - Lainnya
+        - Other
     validations:
       required: true
 
   - type: dropdown
     id: platform
     attributes:
-      label: Dijalankan di mana
-      description: Perilaku browser dan Tauri memang bisa berbeda — Bluetooth dan GPS terutama.
+      label: Where it ran
+      description: Browser and Tauri behaviour genuinely differ — especially Bluetooth and GPS.
       options:
         - Tauri desktop (macOS)
         - Tauri desktop (Windows)
         - Tauri desktop (Linux)
         - Tauri Android (APK)
-        - Browser desktop
-        - Browser mobile
+        - Desktop browser
+        - Mobile browser
     validations:
       required: true
 
   - type: textarea
     id: console
     attributes:
-      label: Error di console / log
-      description: Buka DevTools, tab Console. Tempel error yang merah.
+      label: Console errors / logs
+      description: Open DevTools, Console tab. Paste anything in red.
       render: shell
 
   - type: checkboxes
     id: checks
     attributes:
-      label: Sudah dicek
+      label: Already checked
       options:
-        - label: Backend (`_server`) sedang jalan dan bisa diakses
-        - label: Sudah cek `TODO.md` — fitur ini memang seharusnya sudah nyata, bukan simulasi
+        - label: The backend (`_server`) is running and reachable
+        - label: Checked `TODO.md` — this feature is supposed to be real, not simulated

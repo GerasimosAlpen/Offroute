@@ -1,34 +1,34 @@
 <!--
-Judul PR: pakai Conventional Commits, misal
-  feat(radar): tambah filter urgensi di Squad Logs
-  fix(personel): perbaiki heading marker saat GPS hilang
-  ci: cache Rust build biar Android tidak 15 menit
+PR title: use Conventional Commits, e.g.
+  feat(radar): add urgency filter to Squad Logs
+  fix(personel): correct heading marker when GPS drops
+  ci: cache the Rust build so Android is not 15 minutes
 -->
 
-## Apa yang berubah
+## What changed
 
-<!-- Satu-dua kalimat. Anggap yang baca belum lihat kodenya. -->
+<!-- One or two sentences. Assume the reader has not seen the code. -->
 
-## Kenapa
+## Why
 
-<!-- Masalah apa yang diselesaikan? Kalau ada issue terkait: Closes #123 -->
+<!-- What problem does this solve? If there is a related issue: Closes #123 -->
 
-## Bagian mana yang tersentuh
+## Areas touched
 
 - [ ] Frontend (`src/`)
 - [ ] Rust / Tauri (`src-tauri/`)
-- [ ] Backend NestJS (`_server/`)
+- [ ] NestJS backend (`_server/`)
 - [ ] CI / workflows (`.github/`)
-- [ ] Dokumentasi
+- [ ] Documentation
 
-## Cara mengujinya
+## How to test it
 
 <!--
-Langkah konkret supaya reviewer bisa mengulang.
-Contoh:
+Concrete steps so a reviewer can reproduce.
+Example:
   1. deno task dev
-  2. buka /#/ranger/radar/map
-  3. klik FLARE, pastikan sequence jalan dan ranger bergerak
+  2. open /#/ranger/radar/map
+  3. hit FLARE, confirm the sequence runs and the ranger moves
 -->
 
 1.
@@ -37,24 +37,25 @@ Contoh:
 
 ## Checklist
 
-- [ ] `deno task typecheck` lolos (tsc pakai `strict` + `noUnusedLocals`)
-- [ ] `deno task build` lolos
-- [ ] Kalau menyentuh Rust: `cargo check` di `src-tauri/` lolos
-- [ ] Kalau menyentuh `_server/`: `npm run build` dan `npm test` lolos
-- [ ] Sudah dicoba manual di browser **dan** di app Tauri (perilakunya bisa beda —
-      lihat `isTauri` di `src/lib/tauri.ts`)
+- [ ] `deno task typecheck` passes (tsc runs with `strict` + `noUnusedLocals`)
+- [ ] `deno task test` passes
+- [ ] `deno task build` passes
+- [ ] If Rust was touched: `cargo check` passes in `src-tauri/`
+- [ ] If `_server/` was touched: `npm run build` and `npm test` pass
+- [ ] Tried manually in the browser **and** in the Tauri app (behaviour differs —
+      see `isTauri` in `src/lib/tauri.ts`)
 
-## Data: nyata atau simulasi?
+## Real data or simulated?
 
 <!--
-PENTING untuk proyek ini. Sebagian fitur sengaja masih simulasi (FLARE,
-deteksi korban, MOCK_HAZARDS). Kalau PR ini menambah data simulasi, tulis di
-sini DAN catat di TODO.md — supaya tidak ada yang mengira itu sudah nyata.
+IMPORTANT for this project. Some features are intentionally simulated (FLARE,
+victim detection, MOCK_HAZARDS). If this PR adds simulated data, say so here
+AND record it in TODO.md, so nobody later mistakes it for real.
 -->
 
-- [ ] Semua data di PR ini nyata (dari backend / sensor / API)
-- [ ] Ada yang masih simulasi — sudah saya catat di `TODO.md`, bagiannya:
+- [ ] Everything in this PR is real data (backend / sensor / API)
+- [ ] Something is still simulated — recorded in `TODO.md` under:
 
-## Catatan buat reviewer
+## Notes for the reviewer
 
-<!-- Ada yang kamu ragu? Bagian mana yang paling perlu dilihat teliti? -->
+<!-- Anything you are unsure about? Which part deserves the closest look? -->
