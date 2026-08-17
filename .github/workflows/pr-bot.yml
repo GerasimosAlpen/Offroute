@@ -44,18 +44,26 @@ jobs:
               '',
               `**Pembuat PR:** @${context.payload.pull_request.user.login}`,
               '',
-              '**Perkiraan waktu build:**',
+              '**Perkiraan waktu.** Angka ini diukur dari run nyata di repo ini,',
+              'bukan tebakan. Semua job jalan paralel, jadi total ≈ job terlama.',
               '',
-              '| Target | Estimasi |',
-              '| --- | --- |',
-              '| Android | ~10-15 menit |',
-              '| Windows | ~5-10 menit |',
-              '| Linux | ~5-10 menit |',
-              '| macOS | ~5-10 menit |',
-              '| iOS (simulator) | ~5-10 menit |',
+              '| Job | Cache dingin | Cache panas |',
+              '| --- | --- | --- |',
+              '| CI (typecheck, test, lint) | ~2 menit | ~2 menit |',
+              '| Security | ~1 menit | ~1 menit |',
+              '| macOS Apple Silicon | ~6 menit | ~3 menit |',
+              '| Linux | ~8 menit | ~4 menit |',
+              '| Windows | ~10 menit | ~5 menit |',
+              '| macOS Intel | ~10 menit | ~5 menit |',
+              '| Android | ~16 menit | ~7 menit |',
+              '| **Total (paralel)** | **~16 menit** | **~7 menit** |',
               '',
-              '> Komentar ini akan diperbarui otomatis kalau build sudah selesai.',
-              '> Kalau ada yang merah, jangan panik — log lengkapnya ada di tab **Actions**.',
+              '"Cache dingin" = pertama kali setelah `Cargo.toml`, `deno.lock`, atau',
+              'toolchain berubah. Selain itu cache Rust/Gradle/Deno kepakai.',
+              '',
+              '> Komentar ini akan diperbarui otomatis kalau build sudah selesai —',
+              '> tidak ada komentar baru, jadi PR tidak kebanjiran.',
+              '> Kalau ada yang merah, jangan panik: log lengkapnya ada di tab **Actions**.',
             ].join('\n');
 
             await github.rest.issues.createComment({
@@ -126,7 +134,7 @@ jobs:
               '',
               ok
                 ? `Artefak (APK, EXE, DEB, DMG) bisa diunduh di [halaman run ini](${run.html_url}) bagian **Artifacts**.`
-                : `Yang perlu dicek: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
+                : `@${pr.user.login} — ada yang perlu dicek: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
                   `Buka [log lengkapnya di sini](${run.html_url}), cari baris merah pertama — biasanya itu akar masalahnya.\n\n` +
                   `> Catatan: job macOS dan iOS masih non-blocking, jadi kalau cuma dua itu yang merah, PR ini tetap boleh di-merge.`,
               '',

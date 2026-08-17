@@ -423,6 +423,31 @@ Eight workflows in `.github/workflows/`. All validated with `actionlint`.
 | `commitlint.yml` | PR | Conventional Commits check — **advisory, never blocks** |
 | `sprint-report.yml` | weekly | Posts a sprint summary issue |
 
+### How long a run takes
+
+Measured from the first real run of this pipeline (run `32017173780`), not
+estimated. Every job runs in parallel, so total wall clock ≈ the slowest job.
+
+| Job | Cold cache | Warm cache |
+|---|---|---|
+| CI (typecheck, lint, test, bundle) | ~2 min | ~2 min |
+| Security | ~1 min | ~1 min |
+| Commit Lint | <1 min | <1 min |
+| macOS Apple Silicon | ~6 min | ~3 min |
+| Linux | ~8 min | ~4 min |
+| Windows | ~10 min | ~5 min |
+| macOS Intel | ~10 min | ~5 min |
+| Android | ~16 min | ~7 min |
+| **Total (parallel)** | **~16 min** | **~7 min** |
+
+"Cold cache" means the first run after `Cargo.toml`, `deno.lock`, or the
+toolchain changes. Otherwise `Swatinem/rust-cache`, the Gradle cache and the
+Deno cache all apply. The warm figures are extrapolated from cache hit rates,
+not yet measured over many runs — treat them as a guide.
+
+For reference, the pipeline this replaced had **no caching at all** and
+compiled `cargo-ndk` from source on every single run.
+
 ### Notes that matter
 
 - `ci.yml` uses path filters, so a docs-only PR skips the heavy jobs.

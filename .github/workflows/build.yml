@@ -249,27 +249,27 @@ jobs:
       - name: Generate Xcode project
         run: deno task tauri ios init --ci
 
-      # Build through xcodebuild directly rather than `tauri ios build`, which
-      # expects a signing team. CODE_SIGNING_ALLOWED=NO keeps this credential-free.
+      # Must go through the Tauri CLI, not xcodebuild directly.
+      #
+      # The generated Xcode project has a "Build Rust Code" script phase that
+      # shells out to `tauri ios xcode-script`, and that command expects an
+      # environment only the Tauri CLI sets up. Invoking xcodebuild by hand
+      # makes it panic looking for a dev-server address file that exists only
+      # under `tauri ios dev`:
+      #
+      #   failed to read missing addr file .../com.offroute.desktop-server-addr
+      #
+      # --target aarch64-sim builds for the simulator, which needs no signing
+      # certificate and therefore no paid Apple Developer account.
       - name: Build for simulator (unsigned)
-        run: |
-          deno task build
-          cd src-tauri/gen/apple
-          xcodebuild \
-            -project offroute.xcodeproj \
-            -scheme offroute_iOS \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
+        run: deno task tauri ios build --target aarch64-sim
 
       - name: Upload simulator .app
         uses: actions/upload-artifact@v4
         with:
           name: offroute-ios-simulator
-          path: src-tauri/gen/apple/build/Build/Products/**/*.app
+          path: |
+            src-tauri/gen/apple/build/**/*.app
+            src-tauri/gen/apple/build/**/*.ipa
           if-no-files-found: warn
           retention-days: 14
