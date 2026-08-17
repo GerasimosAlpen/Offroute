@@ -4,13 +4,11 @@
 # at all and recompiled cargo-ndk from source on every single run.
 name: Build
 
+# NOTE: this workflow deliberately does NOT trigger on push to main.
+# release.yml owns main — it calls this workflow via workflow_call and then
+# publishes the result. Triggering here too would build every platform twice
+# for the same commit.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - '**.md'
-      - '.github/ISSUE_TEMPLATE/**'
-      - 'LICENSE'
   pull_request:
     branches: [main]
     paths-ignore:
@@ -39,9 +37,6 @@ jobs:
   desktop:
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
-    # macOS has never been built in this repo before, so it must not be able to
-    # block a merge until it has been observed green. Remove once it is.
-    continue-on-error: ${{ matrix.experimental }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,20 +44,16 @@ jobs:
           - os: ubuntu-22.04
             label: Linux (.deb + .AppImage)
             args: '--bundles deb,appimage'
-            experimental: false
           - os: windows-latest
             label: Windows (.exe + .msi)
             args: '--bundles nsis,msi'
-            experimental: false
           - os: macos-latest
             label: macOS Apple Silicon (.dmg)
             args: '--target aarch64-apple-darwin --bundles dmg,app'
-            experimental: true
           # GitHub retired the macos-13 Intel image; macos-15-intel replaces it.
           - os: macos-15-intel
             label: macOS Intel (.dmg)
             args: '--target x86_64-apple-darwin --bundles dmg,app'
-            experimental: true
 
     steps:
       - uses: actions/checkout@v4
@@ -209,67 +200,4 @@ jobs:
           name: offroute-android
           path: src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
           if-no-files-found: error
-          retention-days: 14
-
-  # ---------------------------------------------------------------------------
-  # iOS, simulator only.
-  #
-  # src-tauri/gen/apple does not exist in the repo, so this generates it at build
-  # time. Deliberately unsigned and simulator-targeted: device builds need a paid
-  # Apple Developer account and signing certificates in secrets, which the team
-  # does not have yet. Non-blocking until observed green.
-  # ---------------------------------------------------------------------------
-  ios:
-    name: iOS (simulator, unsigned)
-    runs-on: macos-latest
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-          cache: true
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios-sim,x86_64-apple-ios
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          key: ios
-
-      - name: Install frontend dependencies
-        run: deno install
-
-      - name: Generate Xcode project
-        run: deno task tauri ios init --ci
-
-      # Must go through the Tauri CLI, not xcodebuild directly.
-      #
-      # The generated Xcode project has a "Build Rust Code" script phase that
-      # shells out to `tauri ios xcode-script`, and that command expects an
-      # environment only the Tauri CLI sets up. Invoking xcodebuild by hand
-      # makes it panic looking for a dev-server address file that exists only
-      # under `tauri ios dev`:
-      #
-      #   failed to read missing addr file .../com.offroute.desktop-server-addr
-      #
-      # --target aarch64-sim builds for the simulator, which needs no signing
-      # certificate and therefore no paid Apple Developer account.
-      - name: Build for simulator (unsigned)
-        run: deno task tauri ios build --target aarch64-sim
-
-      - name: Upload simulator .app
-        uses: actions/upload-artifact@v4
-        with:
-          name: offroute-ios-simulator
-          path: |
-            src-tauri/gen/apple/build/**/*.app
-            src-tauri/gen/apple/build/**/*.ipa
-          if-no-files-found: warn
           retention-days: 14
