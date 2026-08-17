@@ -1,0 +1,65 @@
+name: Usulan Fitur
+description: Ide fitur baru atau perbaikan
+title: 'feat: '
+labels: ['enhancement']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah yang mau diselesaikan
+      description: Mulai dari masalahnya, bukan dari solusinya.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Usulan solusi
+    validations:
+      required: true
+
+  - type: dropdown
+    id: persona
+    attributes:
+      label: Untuk siapa
+      options:
+        - Warga (masyarakat terdampak)
+        - Personel lapangan (SAR / relawan)
+        - Operator (BPBD / posko, Ranger Command)
+        - Semua
+        - Internal (developer / tooling)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: requirement
+    attributes:
+      label: Terkait kebutuhan fungsional yang mana (proposal Tabel 2)
+      options:
+        - 'FR-01 — Hitung rute teraman ke titik evakuasi (WPMTRS)'
+        - 'FR-02 — Update bobot bahaya dari laporan insiden'
+        - 'FR-03 — Lapor insiden dengan lokasi dan foto'
+        - 'FR-04 — Mode Flare via BLE'
+        - 'FR-05 — Tactical map, log insiden, status unit'
+        - 'FR-06 — Sinkronisasi lewat UDP multicast'
+        - 'FR-07 — Kelola titik evakuasi dan kapasitas'
+        - 'FR-08 — Simpan log laporan dan histori rute'
+        - 'FR-09 — Unduh peta offline'
+        - 'Tidak terkait FR mana pun (ide baru)'
+
+  - type: dropdown
+    id: offline
+    attributes:
+      label: Apakah harus jalan tanpa internet
+      description: Offline-first adalah alasan utama aplikasi ini ada. Fitur yang butuh cloud perlu justifikasi.
+      options:
+        - 'Ya — wajib jalan offline'
+        - 'Tidak — boleh butuh internet'
+        - 'Sebagian — jalan offline dengan kemampuan terbatas'
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatif yang sudah dipertimbangkan

@@ -1,0 +1,53 @@
+# Auto-labels PRs by which part of the codebase they touch, and flags very
+# large PRs. With three people working across a Preact frontend, a Rust/Tauri
+# shell and a NestJS backend, "which area is this?" should not need asking.
+name: Labeler
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    name: Apply area labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/labeler@v5
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          sync-labels: true
+
+  size:
+    name: Flag large PRs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const changed = pr.additions + pr.deletions;
+
+            // Advisory only — never fails the PR. A big refactor is sometimes
+            // exactly right; the label just tells the reviewer what they are in for.
+            const label =
+              changed < 50 ? 'size:XS' :
+              changed < 200 ? 'size:S' :
+              changed < 600 ? 'size:M' :
+              changed < 1500 ? 'size:L' : 'size:XL';
+
+            const { owner, repo } = context.repo;
+            const current = pr.labels.map((l) => l.name).filter((n) => n.startsWith('size:'));
+            for (const stale of current.filter((n) => n !== label)) {
+              await github.rest.issues.removeLabel({
+                owner, repo, issue_number: pr.number, name: stale,
+              }).catch(() => {});
+            }
+            if (!current.includes(label)) {
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: pr.number, labels: [label],
+              });
+            }

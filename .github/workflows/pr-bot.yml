@@ -1,0 +1,160 @@
+# The PR bot ("witch hunt" — semangatnya tetap, kata kasarnya sudah tidak).
+#
+# Two triggers, on purpose:
+#
+#  * pull_request_target — fires the greeting the moment a PR opens. Needed
+#    because PRs here come from forks, and a plain `pull_request` trigger gets
+#    a read-only token that cannot post a comment. This job NEVER checks out or
+#    runs PR code; it only reads context values, which is what makes
+#    pull_request_target safe to use here.
+#
+#  * workflow_run — fires after Build finishes and reports the result. Same
+#    reason: the Build run itself has no write access on a fork PR.
+#
+# Both write to a single sticky comment instead of adding a new one per run.
+# The old pipeline posted two fresh comments on every push, which buried long
+# PRs in noise.
+name: PR Bot
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  greet:
+    name: Salam pembuka
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- offroute-pr-bot -->';
+            const body = [
+              marker,
+              '### Offroute CI sedang memeriksa perubahan kamu',
+              '',
+              `**Pembuat PR:** @${context.payload.pull_request.user.login}`,
+              '',
+              '**Perkiraan waktu build:**',
+              '',
+              '| Target | Estimasi |',
+              '| --- | --- |',
+              '| Android | ~10-15 menit |',
+              '| Windows | ~5-10 menit |',
+              '| Linux | ~5-10 menit |',
+              '| macOS | ~5-10 menit |',
+              '| iOS (simulator) | ~5-10 menit |',
+              '',
+              '> Komentar ini akan diperbarui otomatis kalau build sudah selesai.',
+              '> Kalau ada yang merah, jangan panik — log lengkapnya ada di tab **Actions**.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+  # ---------------------------------------------------------------------------
+  report:
+    name: Laporan hasil build
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const marker = '<!-- offroute-pr-bot -->';
+
+            // A workflow_run payload does not carry the PR number, so resolve it
+            // from the head SHA.
+            const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: run.head_sha,
+            });
+            const pr = prs.data.find((p) => p.state === 'open');
+            if (!pr) {
+              core.info('No open PR for this commit — nothing to report.');
+              return;
+            }
+
+            // Per-job results, so the table says which platform broke rather
+            // than just "build failed".
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner: context.repo.owner, repo: context.repo.repo, run_id: run.id },
+            );
+
+            const icon = (c) => ({
+              success: 'Berhasil',
+              failure: 'Gagal',
+              cancelled: 'Dibatalkan',
+              skipped: 'Dilewati',
+            }[c] ?? c ?? 'Tidak diketahui');
+
+            const rows = jobs
+              .filter((j) => j.name !== 'Laporan hasil build')
+              .map((j) => `| ${j.name} | ${icon(j.conclusion)} |`)
+              .join('\n');
+
+            const failed = jobs.filter((j) => j.conclusion === 'failure');
+            const ok = failed.length === 0;
+
+            const body = [
+              marker,
+              ok
+                ? '### Semua build berhasil'
+                : '### Ada build yang gagal',
+              '',
+              `**Commit:** \`${run.head_sha.slice(0, 7)}\` oleh @${pr.user.login}`,
+              '',
+              '| Job | Status |',
+              '| --- | --- |',
+              rows,
+              '',
+              ok
+                ? `Artefak (APK, EXE, DEB, DMG) bisa diunduh di [halaman run ini](${run.html_url}) bagian **Artifacts**.`
+                : `Yang perlu dicek: ${failed.map((j) => `**${j.name}**`).join(', ')}.\n\n` +
+                  `Buka [log lengkapnya di sini](${run.html_url}), cari baris merah pertama — biasanya itu akar masalahnya.\n\n` +
+                  `> Catatan: job macOS dan iOS masih non-blocking, jadi kalau cuma dua itu yang merah, PR ini tetap boleh di-merge.`,
+              '',
+              '> Semangat, pasti bisa!',
+            ].join('\n');
+
+            // Update the sticky comment if it exists, otherwise create it.
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              issue_number: pr.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const existing = comments.find(
+              (c) => c.user.type === 'Bot' && c.body.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: pr.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body,
+              });
+            }
