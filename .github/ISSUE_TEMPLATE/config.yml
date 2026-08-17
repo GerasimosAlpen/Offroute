@@ -1,8 +1,11 @@
 blank_issues_enabled: true
 contact_links:
-  - name: Status fitur (sudah nyata / masih simulasi / ditunda)
-    url: https://github.com/hiyokun-d/Offroute/blob/main/TODO.md
-    about: Sebelum lapor bug, cek dulu di sini — sebagian fitur memang sengaja masih simulasi.
-  - name: Cara menjalankan dan arsitektur
-    url: https://github.com/hiyokun-d/Offroute/blob/main/docs.md
-    about: Setup, environment variable, penjelasan tiap modul, dan troubleshooting.
+  - name: Feature status (real / simulated / deferred)
+    url: https://github.com/GerasimosAlpen/Offroute/blob/main/TODO.md
+    about: Check here before filing a bug — some features are intentionally still simulated.
+  - name: Setup and architecture
+    url: https://github.com/GerasimosAlpen/Offroute/blob/main/docs.md
+    about: Installation, environment variables, per-module explanations, troubleshooting.
+  - name: Download the latest build
+    url: https://github.com/GerasimosAlpen/Offroute/releases/tag/latest
+    about: Installers for Windows, macOS, Linux and Android, rebuilt on every merge to main.

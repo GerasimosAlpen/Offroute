@@ -97,17 +97,17 @@ jobs:
           {
             echo "changelog<<CHANGELOG_EOF"
             if [ "$TAG" = "latest" ]; then
-              echo "### Perubahan terbaru di \`main\`"
+              echo "### Latest changes on \`main\`"
               echo ""
               git log --pretty=format:'- %s (%an)' -15
             else
               PREV=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
               if [ -n "$PREV" ]; then
-                echo "### Perubahan sejak $PREV"
+                echo "### Changes since $PREV"
                 echo ""
                 git log --pretty=format:'- %s (%an)' "$PREV..$TAG"
               else
-                echo "### Rilis pertama"
+                echo "### First release"
                 echo ""
                 git log --pretty=format:'- %s (%an)' -20
               fi
@@ -131,19 +131,19 @@ jobs:
 
             ---
 
-            ### Unduhan
+            ### Downloads
 
-            | Platform | Berkas |
+            | Platform | File |
             | --- | --- |
-            | Windows | `.exe` (installer NSIS) atau `.msi` |
+            | Windows | `.exe` (NSIS installer) or `.msi` |
             | macOS Apple Silicon | `.dmg` (aarch64) |
             | macOS Intel | `.dmg` (x86_64) |
-            | Linux | `.deb` (Debian/Ubuntu) atau `.AppImage` (portable) |
+            | Linux | `.deb` (Debian/Ubuntu) or `.AppImage` (portable) |
             | Android | `.apk` |
 
-            > **Catatan.** APK Android ditandatangani dengan *debug key* — cocok
-            > untuk pengujian, belum untuk distribusi publik. macOS dan Windows
-            > akan menampilkan peringatan "aplikasi tidak dikenal" karena belum
-            > ada code signing certificate.
+            > **Note.** The Android APK is signed with a *debug key* — fine for
+            > testing, not for public distribution. macOS and Windows will warn
+            > about an "unidentified developer" because there is no code signing
+            > certificate yet.
             >
-            > Build iOS tidak tersedia: butuh akun Apple Developer berbayar.
+            > No iOS build: that requires a paid Apple Developer account.

@@ -506,9 +506,9 @@ path every PR exercises.
 [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-feat(radar): tambah filter urgensi di Squad Logs
-fix(personel): perbaiki heading marker saat GPS hilang
-ci: cache Rust build biar Android tidak 15 menit
+feat(radar): add urgency filter to Squad Logs
+fix(personel): correct heading marker when GPS drops
+ci: cache the Rust build so Android is not 15 minutes
 ```
 
 Types: `feat` `fix` `docs` `style` `refactor` `perf` `test` `build` `ci`

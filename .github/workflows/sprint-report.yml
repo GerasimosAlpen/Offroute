@@ -45,7 +45,7 @@ jobs:
             const authorRows = Object.entries(byAuthor)
               .sort((a, b) => b[1] - a[1])
               .map(([name, n]) => `| ${name} | ${n} |`)
-              .join('\n') || '| _(tidak ada commit)_ | 0 |';
+              .join('\n') || '| _(no commits)_ | 0 |';
 
             // --- Pull requests -------------------------------------------------
             const allPrs = await github.paginate(github.rest.pulls.list, {
@@ -58,17 +58,17 @@ jobs:
 
             const mergedList = merged.length
               ? merged.map((p) => `- #${p.number} ${p.title} — @${p.user.login}`).join('\n')
-              : '_Tidak ada PR yang di-merge minggu ini._';
+              : '_No PRs were merged this week._';
 
             const openList = open.length
               ? open.map((p) => {
                   const age = Math.floor(
                     (Date.now() - new Date(p.created_at)) / 86400000,
                   );
-                  const stale = age >= 7 ? ' **(sudah lama, tolong direview)**' : '';
-                  return `- #${p.number} ${p.title} — @${p.user.login}, ${age} hari${stale}`;
+                  const stale = age >= 7 ? ' **(stale — please review)**' : '';
+                  return `- #${p.number} ${p.title} — @${p.user.login}, ${age} days old${stale}`;
                 }).join('\n')
-              : '_Tidak ada PR yang terbuka._';
+              : '_No open PRs._';
 
             // --- Open issues ---------------------------------------------------
             const issues = (await github.paginate(github.rest.issues.listForRepo, {
@@ -77,48 +77,48 @@ jobs:
 
             const issueList = issues.length
               ? issues.slice(0, 15).map((i) => `- #${i.number} ${i.title}`).join('\n')
-              : '_Tidak ada issue terbuka._';
+              : '_No open issues._';
 
             const today = new Date().toISOString().slice(0, 10);
             const body = [
-              `## Laporan Sprint — minggu yang berakhir ${today}`,
+              `## Sprint report — week ending ${today}`,
               '',
-              'Dibuat otomatis untuk bahan **sprint review** dan **retrospective**.',
+              'Generated automatically as input for **sprint review** and **retrospective**.',
               '',
-              `### Commit (${commits.length} total)`,
+              `### Commits (${commits.length} total)`,
               '',
-              '| Kontributor | Commit |',
+              '| Contributor | Commits |',
               '| --- | --- |',
               authorRows,
               '',
-              `### PR yang di-merge (${merged.length})`,
+              `### Merged PRs (${merged.length})`,
               '',
               mergedList,
               '',
-              `### PR yang masih terbuka (${open.length})`,
+              `### Still-open PRs (${open.length})`,
               '',
               openList,
               '',
-              `### Issue terbuka (${issues.length})`,
+              `### Open issues (${issues.length})`,
               '',
               issueList,
               '',
               '---',
               '',
-              '### Bahan diskusi retrospective',
+              '### Retrospective discussion points',
               '',
-              '- [ ] Apa yang selesai minggu ini vs. yang direncanakan?',
-              '- [ ] Ada PR yang menggantung lebih dari 7 hari? Kenapa?',
-              '- [ ] Ada blocker yang perlu dibahas bareng?',
-              '- [ ] Target sprint berikutnya apa?',
+              '- [ ] What shipped this week versus what was planned?',
+              '- [ ] Any PR left hanging more than 7 days? Why?',
+              '- [ ] Any blocker that needs the whole team?',
+              '- [ ] What is the target for next sprint?',
               '',
-              '> Lihat `TODO.md` untuk status terkini fitur mana yang sudah nyata,',
-              '> mana yang masih simulasi, dan mana yang ditunda.',
+              '> See `TODO.md` for the current status of which features are real,',
+              '> which are still simulated, and which are deferred.',
             ].join('\n');
 
             await github.rest.issues.create({
               owner, repo,
-              title: `Laporan Sprint — ${today}`,
+              title: `Sprint report — ${today}`,
               body,
               labels: ['sprint-report'],
             });
