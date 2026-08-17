@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Status fitur (sudah nyata / masih simulasi / ditunda)
+    url: https://github.com/hiyokun-d/Offroute/blob/main/TODO.md
+    about: Sebelum lapor bug, cek dulu di sini — sebagian fitur memang sengaja masih simulasi.
+  - name: Cara menjalankan dan arsitektur
+    url: https://github.com/hiyokun-d/Offroute/blob/main/docs.md
+    about: Setup, environment variable, penjelasan tiap modul, dan troubleshooting.

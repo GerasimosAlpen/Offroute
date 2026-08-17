@@ -37,6 +37,13 @@ android {
             }
         }
         getByName("release") {
+            // Offroute talks to a NestJS command post over plain HTTP on a
+            // local network (e.g. http://192.168.1.10:3000) with no CA and no
+            // certificate — that is the whole point of an offline-first
+            // disaster tool. With cleartext disabled, every API call and the
+            // Socket.IO connection fail silently in the release APK while
+            // working fine in debug, which is a miserable bug to chase.
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             proguardFiles(

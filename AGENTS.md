@@ -65,7 +65,14 @@ This project is indexed by GitNexus as **offroute** (27 symbols, 18 relationship
 | **Rust deps** | tauri 2, tauri-plugin-opener, serde, serde_json | |
 | **Backend (external)** | NestJS v11 + Prisma v7 + PostgreSQL | Lives in `_server/`, runs separately |
 
-> **Known issue:** `prisma` is listed in the root `package.json` dependencies — it belongs only in `_server/`. Do not import Prisma in frontend code.
+> **Resolved 2026-08-17:** `prisma` is no longer in the root `package.json`.
+> Still do not import Prisma in frontend code — it belongs only to `_server/`.
+
+> **Package manager:** Deno only. `deno.json` holds the task table and
+> `deno.lock` is the sole lockfile; `package.json` remains because Deno reads
+> it for the npm dependency set. Do **not** run `npm install` at the repo root.
+> `_server/` is the exception — it is a standalone Node service with its own
+> `package-lock.json`.
 
 ---
 
@@ -229,24 +236,36 @@ strip = true         # strip debug symbols from binary
 
 ## Current State: What Exists
 
+> **Corrected 2026-08-17.** Everything below used to describe a fresh
+> `create-tauri-app` scaffold. It no longer does — the placeholders are gone,
+> the CSP is real, and there are six command modules. For the full developer
+> reference (all 18 IPC commands, 34 REST endpoints, 16 WebSocket events,
+> environment variables, CI/CD), read **`docs.md`**. For feature status, read
+> **`TODO.md`**.
+
 ```
 src-tauri/
 ├── src/
 │   ├── main.rs          # entrypoint, no-console in release
-│   └── lib.rs           # Builder setup, greet command
+│   ├── lib.rs           # Builder: 6 plugins, 18 commands
+│   └── commands/        # bluetooth, control, device, system_status, terminal
 ├── capabilities/
-│   └── default.json     # core:default + opener:default
-├── Cargo.toml           # tauri 2, tauri-plugin-opener, serde, serde_json
-├── tauri.conf.json      # productName: tauri-app (placeholder), 800x600 window
+│   └── default.json     # core, opener, notification, os, store, sql, geolocation
+├── Cargo.toml           # + btleplug, tokio, uuid, futures, starship-battery
+├── tauri.conf.json      # productName Offroute, id com.offroute.desktop, real CSP
+├── gen/android/         # generated Android project, committed for CI
 └── build.rs             # tauri_build::build()
 ```
 
-**Placeholders to update before shipping:**
-- `tauri.conf.json`: `productName`, `identifier` (`com.macbookairm1.tauri-app`)
-- `tauri.conf.json`: window title "Jawa ganteng"
-- `tauri.conf.json`: `security.csp` is `null` — set a real CSP before release
-- `Cargo.toml`: `name = "tauri-app"`, `authors = ["you"]`
-- Add `[profile.release]` optimizations to `Cargo.toml`
+**Resolved** — these scaffold placeholders no longer exist: `productName` is
+`Offroute`, the identifier is `com.offroute.desktop`, the window title is
+`Offroute`, `security.csp` is a real policy, and `[profile.release]`
+optimizations are set.
+
+**Still outstanding:**
+- `Cargo.toml`: `[lib] name = "tauri_app_lib"` is still the scaffold name.
+  Renaming it means regenerating `gen/android`, which references the crate.
+- `Cargo.toml`: `authors = []`.
 
 ---
 

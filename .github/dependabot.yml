@@ -1,0 +1,84 @@
+# Dependency updates, grouped so three people are not drowned in PRs.
+#
+# Everything is weekly and batched: minor/patch bumps arrive as ONE PR per
+# ecosystem. Major bumps come separately because they need real review.
+version: 2
+
+updates:
+  # --- Frontend (npm deps, resolved through Deno) ------------------------------
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    labels: ['area:deps', 'area:frontend']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      frontend-minor:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+    ignore:
+      # Preact 11 is a deliberate migration, not a drive-by bump. The whole app
+      # runs React libraries through preact/compat aliases.
+      - dependency-name: preact
+        update-types: ['version-update:semver-major']
+      # react-leaflet 4.x is pinned to React 18 semantics and works only via the
+      # compat shim; a major bump needs hands-on testing of every map surface.
+      - dependency-name: react-leaflet
+        update-types: ['version-update:semver-major']
+
+  # --- Backend (NestJS) --------------------------------------------------------
+  - package-ecosystem: npm
+    directory: '/_server'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    labels: ['area:deps', 'area:backend']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      backend-minor:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # --- Rust / Tauri ------------------------------------------------------------
+  - package-ecosystem: cargo
+    directory: '/src-tauri'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 5
+    labels: ['area:deps', 'area:rust']
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      rust-minor:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+
+  # --- GitHub Actions ----------------------------------------------------------
+  # The pipeline is load-bearing for shipping desktop and mobile builds, so keep
+  # the actions themselves current.
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '02:00'
+      timezone: Asia/Jakarta
+    open-pull-requests-limit: 3
+    labels: ['area:deps', 'area:ci']
+    commit-message:
+      prefix: 'ci(deps)'
+    groups:
+      actions:
+        patterns: ['*']

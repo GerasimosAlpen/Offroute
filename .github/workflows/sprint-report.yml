@@ -1,0 +1,124 @@
+# Weekly sprint report.
+#
+# The proposal commits the team to Scrum with weekly sprints, a sprint review
+# and a retrospective. This posts an issue every Monday with what actually
+# happened in the last 7 days, so sprint review runs on data instead of on
+# whoever remembers the most.
+name: Sprint Report
+
+on:
+  schedule:
+    # Monday 01:00 UTC = 08:00 WIB, before the team's week starts.
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  report:
+    name: Post weekly sprint report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+            const sinceISO = since.toISOString();
+
+            // --- Commits, grouped by author -----------------------------------
+            const commits = await github.paginate(github.rest.repos.listCommits, {
+              owner, repo, since: sinceISO, per_page: 100,
+            });
+            const byAuthor = {};
+            for (const c of commits) {
+              const name = c.author?.login ?? c.commit.author?.name ?? 'unknown';
+              byAuthor[name] = (byAuthor[name] ?? 0) + 1;
+            }
+            const authorRows = Object.entries(byAuthor)
+              .sort((a, b) => b[1] - a[1])
+              .map(([name, n]) => `| ${name} | ${n} |`)
+              .join('\n') || '| _(tidak ada commit)_ | 0 |';
+
+            // --- Pull requests -------------------------------------------------
+            const allPrs = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: 'all', sort: 'updated', direction: 'desc', per_page: 100,
+            });
+            const merged = allPrs.filter(
+              (p) => p.merged_at && new Date(p.merged_at) >= since,
+            );
+            const open = allPrs.filter((p) => p.state === 'open');
+
+            const mergedList = merged.length
+              ? merged.map((p) => `- #${p.number} ${p.title} — @${p.user.login}`).join('\n')
+              : '_Tidak ada PR yang di-merge minggu ini._';
+
+            const openList = open.length
+              ? open.map((p) => {
+                  const age = Math.floor(
+                    (Date.now() - new Date(p.created_at)) / 86400000,
+                  );
+                  const stale = age >= 7 ? ' **(sudah lama, tolong direview)**' : '';
+                  return `- #${p.number} ${p.title} — @${p.user.login}, ${age} hari${stale}`;
+                }).join('\n')
+              : '_Tidak ada PR yang terbuka._';
+
+            // --- Open issues ---------------------------------------------------
+            const issues = (await github.paginate(github.rest.issues.listForRepo, {
+              owner, repo, state: 'open', per_page: 100,
+            })).filter((i) => !i.pull_request);
+
+            const issueList = issues.length
+              ? issues.slice(0, 15).map((i) => `- #${i.number} ${i.title}`).join('\n')
+              : '_Tidak ada issue terbuka._';
+
+            const today = new Date().toISOString().slice(0, 10);
+            const body = [
+              `## Laporan Sprint — minggu yang berakhir ${today}`,
+              '',
+              'Dibuat otomatis untuk bahan **sprint review** dan **retrospective**.',
+              '',
+              `### Commit (${commits.length} total)`,
+              '',
+              '| Kontributor | Commit |',
+              '| --- | --- |',
+              authorRows,
+              '',
+              `### PR yang di-merge (${merged.length})`,
+              '',
+              mergedList,
+              '',
+              `### PR yang masih terbuka (${open.length})`,
+              '',
+              openList,
+              '',
+              `### Issue terbuka (${issues.length})`,
+              '',
+              issueList,
+              '',
+              '---',
+              '',
+              '### Bahan diskusi retrospective',
+              '',
+              '- [ ] Apa yang selesai minggu ini vs. yang direncanakan?',
+              '- [ ] Ada PR yang menggantung lebih dari 7 hari? Kenapa?',
+              '- [ ] Ada blocker yang perlu dibahas bareng?',
+              '- [ ] Target sprint berikutnya apa?',
+              '',
+              '> Lihat `TODO.md` untuk status terkini fitur mana yang sudah nyata,',
+              '> mana yang masih simulasi, dan mana yang ditunda.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner, repo,
+              title: `Laporan Sprint — ${today}`,
+              body,
+              labels: ['sprint-report'],
+            });

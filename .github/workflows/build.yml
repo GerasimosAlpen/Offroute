@@ -1,0 +1,275 @@
+# Wraps Offroute into installable desktop and mobile binaries.
+#
+# Every job is cached (Rust, Gradle, Deno). The previous pipeline had no caching
+# at all and recompiled cargo-ndk from source on every single run.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.github/ISSUE_TEMPLATE/**'
+      - 'LICENSE'
+  workflow_dispatch:
+  # Lets release.yml reuse these exact jobs instead of duplicating them.
+  workflow_call:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # Keeps cargo output readable in the Actions log.
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Desktop: Linux, Windows, macOS (Apple Silicon + Intel).
+  # ---------------------------------------------------------------------------
+  desktop:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    # macOS has never been built in this repo before, so it must not be able to
+    # block a merge until it has been observed green. Remove once it is.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            label: Linux (.deb + .AppImage)
+            args: '--bundles deb,appimage'
+            experimental: false
+          - os: windows-latest
+            label: Windows (.exe + .msi)
+            args: '--bundles nsis,msi'
+            experimental: false
+          - os: macos-latest
+            label: macOS Apple Silicon (.dmg)
+            args: '--target aarch64-apple-darwin --bundles dmg,app'
+            experimental: true
+          # GitHub retired the macos-13 Intel image; macos-15-intel replaces it.
+          - os: macos-15-intel
+            label: macOS Intel (.dmg)
+            args: '--target x86_64-apple-darwin --bundles dmg,app'
+            experimental: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+          cache: true
+
+      # Tauri v2 on Linux. libwebkit2gtk-4.1 is the v2 requirement (v1 used 4.0).
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            patchelf \
+            build-essential \
+            file \
+            wget
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # macOS runners default to the host arch only; add the explicit target so
+      # the aarch64/x86_64 split above resolves.
+      - name: Add Rust target (macOS)
+        if: runner.os == 'macOS'
+        run: rustup target add ${{ contains(matrix.args, 'aarch64') && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.os }}
+
+      - name: Install frontend dependencies
+        run: deno install
+
+      # tauri build runs `deno task build` itself via beforeBuildCommand.
+      - name: Build application
+        run: deno task tauri build ${{ matrix.args }}
+
+      - name: Upload Linux artifacts
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offroute-linux
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows artifacts
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offroute-windows
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+          retention-days: 14
+
+      # An explicit --target puts the bundle under target/<triple>/release.
+      - name: Upload macOS artifacts
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offroute-macos-${{ contains(matrix.args, 'aarch64') && 'aarch64' || 'x86_64' }}
+          path: src-tauri/target/*/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Android. gen/android/ is committed, so no `tauri android init` is needed.
+  # Release APKs are signed with the debug key (see gen/android/app/build.gradle.kts)
+  # and are therefore testable but NOT distributable.
+  # ---------------------------------------------------------------------------
+  android:
+    name: Android (.apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+          cache: true
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Tauri resolves the NDK through NDK_HOME. The previous pipeline never set
+      # it, which is a hard failure for `tauri android build`.
+      - name: Install Android NDK
+        run: |
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+
+      # Downloads a prebuilt binary. The old pipeline ran `cargo install cargo-ndk`,
+      # compiling it from source on every run.
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Cache Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install frontend dependencies
+        run: deno install
+
+      - name: Build APK
+        run: deno task tauri android build --apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: offroute-android
+          path: src-tauri/gen/android/app/build/outputs/apk/**/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # iOS, simulator only.
+  #
+  # src-tauri/gen/apple does not exist in the repo, so this generates it at build
+  # time. Deliberately unsigned and simulator-targeted: device builds need a paid
+  # Apple Developer account and signing certificates in secrets, which the team
+  # does not have yet. Non-blocking until observed green.
+  # ---------------------------------------------------------------------------
+  ios:
+    name: iOS (simulator, unsigned)
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+          cache: true
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ios
+
+      - name: Install frontend dependencies
+        run: deno install
+
+      - name: Generate Xcode project
+        run: deno task tauri ios init --ci
+
+      # Must go through the Tauri CLI, not xcodebuild directly.
+      #
+      # The generated Xcode project has a "Build Rust Code" script phase that
+      # shells out to `tauri ios xcode-script`, and that command expects an
+      # environment only the Tauri CLI sets up. Invoking xcodebuild by hand
+      # makes it panic looking for a dev-server address file that exists only
+      # under `tauri ios dev`:
+      #
+      #   failed to read missing addr file .../com.offroute.desktop-server-addr
+      #
+      # --target aarch64-sim builds for the simulator, which needs no signing
+      # certificate and therefore no paid Apple Developer account.
+      - name: Build for simulator (unsigned)
+        run: deno task tauri ios build --target aarch64-sim
+
+      - name: Upload simulator .app
+        uses: actions/upload-artifact@v4
+        with:
+          name: offroute-ios-simulator
+          path: |
+            src-tauri/gen/apple/build/**/*.app
+            src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: warn
+          retention-days: 14
